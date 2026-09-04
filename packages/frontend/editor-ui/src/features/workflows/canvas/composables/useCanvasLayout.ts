@@ -76,6 +76,8 @@ interface CanvasLayoutGroupUnit {
 	groupBox: BoundingBox;
 	/** The box dagre reserves: the group box grown to include attached stickies. */
 	boundingBox: BoundingBox;
+	/** What connections attach to: the tidied members, or the chip. */
+	contentBox: BoundingBox;
 }
 
 const NODE_Y_SPACING = GRID_SIZE * 6;
@@ -189,7 +191,14 @@ export function useCanvasLayout(
 
 			// The collapsed group chip already has the box dagre needs.
 			const chipBox = boundingBoxFromCanvasNode(groupNode);
-			return { node: groupNode, memberIds, stickyIds: [], groupBox: chipBox, boundingBox: chipBox };
+			return {
+				node: groupNode,
+				memberIds,
+				stickyIds: [],
+				groupBox: chipBox,
+				boundingBox: chipBox,
+				contentBox: chipBox,
+			};
 		}
 
 		if (!memberIds.every((memberId) => sourceNodeIds.has(memberId))) return undefined;
@@ -203,7 +212,18 @@ export function useCanvasLayout(
 			width: expandedFrame.width,
 			height: expandedFrame.height,
 		};
-		return { node: groupNode, memberIds, stickyIds: [], groupBox: frameBox, boundingBox: frameBox };
+		const memberBoxes = memberIds
+			.map((memberId) => findNode<CanvasNodeData>(memberId))
+			.filter(isPresent)
+			.map((member) => boundingBoxFromCanvasNode(member));
+		return {
+			node: groupNode,
+			memberIds,
+			stickyIds: [],
+			groupBox: frameBox,
+			boundingBox: frameBox,
+			contentBox: memberBoxes.length > 0 ? compositeBoundingBox(memberBoxes) : frameBox,
+		};
 	}
 
 	/** Converts member connections to group-unit connections for dagre. */
@@ -568,18 +588,6 @@ export function useCanvasLayout(
 		});
 	}
 
-	/** Returns the part of a group unit that connections attach to: its visible members, or its chip. */
-	function getGroupUnitContentBox(groupUnit: CanvasLayoutGroupUnit): BoundingBox {
-		if (groupUnit.node.data?.isCollapsed) return groupUnit.groupBox;
-
-		const memberBoxes = groupUnit.memberIds
-			.map((memberId) => findNode<CanvasNodeData>(memberId))
-			.filter(isPresent)
-			.map((member) => boundingBoxFromCanvasNode(member));
-
-		return memberBoxes.length > 0 ? compositeBoundingBox(memberBoxes) : groupUnit.groupBox;
-	}
-
 	/**
 	 * Re-seats stickies over the nodes they covered: centered horizontally on the
 	 * covered nodes' new bounds, bottom-aligned with a little padding. Stickies
@@ -794,7 +802,7 @@ export function useCanvasLayout(
 			const unitBox = boundingBoxByNodeId[groupUnit.node.id];
 			if (!unitBox) continue;
 
-			const contentBox = getGroupUnitContentBox(groupUnit);
+			const { contentBox } = groupUnit;
 			const axisOffset =
 				contentBox.y +
 				contentBox.height / 2 -
