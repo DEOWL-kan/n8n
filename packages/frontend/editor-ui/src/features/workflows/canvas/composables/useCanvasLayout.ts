@@ -55,6 +55,7 @@ export type CanvasLayoutEvent = {
 	source: CanvasLayoutSource;
 	target: CanvasLayoutTarget;
 };
+export type CanvasLayoutOptions = { nodeIdsFilter?: string[] };
 
 type CanvasLayoutNodeDictionary = Record<string, CanvasLayoutNode>;
 type LayoutConnection = { source: string; target: string; targetX?: number; targetY?: number };
@@ -107,13 +108,20 @@ export function useCanvasLayout(
 ) {
 	const { findNode, getSelectedNodes, edges: allEdges, nodes: allNodes } = useVueFlow(canvasId);
 
-	function getSourceNodes(target: CanvasLayoutTarget) {
+	function getSourceNodes(target: CanvasLayoutTarget, options: CanvasLayoutOptions = {}) {
+		if (options.nodeIdsFilter) {
+			const ids = new Set(options.nodeIdsFilter);
+			return allNodes.value.filter((node) => ids.has(node.id));
+		}
 		return target === 'selection' ? getSelectedNodes.value : allNodes.value;
 	}
 
 	/** Returns the nodes, edges, and group units to pass into dagre. */
-	function getTargetData(target: CanvasLayoutTarget): CanvasLayoutTargetData {
-		const source = getSourceNodes(target);
+	function getTargetData(
+		target: CanvasLayoutTarget,
+		options: CanvasLayoutOptions = {},
+	): CanvasLayoutTargetData {
+		const source = getSourceNodes(target, options);
 		const sourceNodeIds = new Set(source.map((node) => node.id));
 
 		// Dagre lays out each complete group as one box:
@@ -915,8 +923,11 @@ export function useCanvasLayout(
 		return boundingBoxByNodeId;
 	}
 
-	function layout(target: CanvasLayoutTarget): CanvasLayoutResult {
-		const { nodes, edges, groupUnits } = getTargetData(target);
+	function layout(
+		target: CanvasLayoutTarget,
+		options: CanvasLayoutOptions = {},
+	): CanvasLayoutResult {
+		const { nodes, edges, groupUnits } = getTargetData(target, options);
 		const groupUnitBoundingBoxes = new Map(
 			groupUnits.map(({ node, boundingBox }) => [node.id, boundingBox]),
 		);
