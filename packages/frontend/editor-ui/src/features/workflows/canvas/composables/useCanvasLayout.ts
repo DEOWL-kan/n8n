@@ -1013,6 +1013,18 @@ export function useCanvasLayout(
 			id,
 			boundingBox,
 		}));
+		const positionedStickyIds = new Set(
+			positionedNodes
+				.filter(({ id }) => {
+					const node = findNode<CanvasNodeData>(id);
+					return node ? isStickyCanvasNode(node) : false;
+				})
+				.map(({ id }) => id),
+		);
+		const positionedRegularNodes = positionedNodes.filter(({ id }) => !positionedStickyIds.has(id));
+		const positionedMemberStickies = positionedNodes.filter(({ id }) =>
+			positionedStickyIds.has(id),
+		);
 
 		const anchor = {
 			x: boundingBoxAfter.x - boundingBoxBefore.x,
@@ -1040,6 +1052,7 @@ export function useCanvasLayout(
 
 		const positionedStickies = placeStickies(stickies, positionedNodes, getCoveredNodeIds).concat(
 			attachedStickies,
+			positionedMemberStickies,
 		);
 
 		const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE;
@@ -1050,7 +1063,7 @@ export function useCanvasLayout(
 		// (e.g. the content-sized agent card) off the shared axis, leaving its
 		// connections slightly inclined. For default-size nodes the two are
 		// equivalent, since half their extent is already grid-aligned.
-		const finalNodes = positionedNodes
+		const finalNodes = positionedRegularNodes
 			.map(({ id, boundingBox }) => {
 				const [x, y] = snapPositionToGridByCenter(
 					[boundingBox.x - anchor.x, boundingBox.y - anchor.y],

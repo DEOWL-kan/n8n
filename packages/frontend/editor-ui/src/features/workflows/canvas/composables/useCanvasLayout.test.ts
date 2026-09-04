@@ -833,6 +833,78 @@ describe('useCanvasLayout', () => {
 			expect(matchesGrid(result)).toBe(true);
 		});
 
+		test.each([
+			['expanded', false],
+			['collapsed', true],
+		])('keeps an internal sticky note aligned with a %s group', (_, isCollapsed) => {
+			const trigger = createCanvasGraphNode({ id: 'trigger', position: { x: -336, y: -256 } });
+			const first = createCanvasGraphNode({
+				id: 'first',
+				position: { x: -128, y: -400 },
+				hidden: isCollapsed,
+			});
+			const second = createCanvasGraphNode({
+				id: 'second',
+				position: { x: 256, y: -272 },
+				hidden: isCollapsed,
+			});
+			const stickyDimensions = { width: 240, height: 180 };
+			const sticky = createCanvasGraphNode({
+				id: 'sticky',
+				data: { type: STICKY_NODE_TYPE },
+				dimensions: stickyDimensions,
+				position: { x: -80, y: -48 },
+				hidden: isCollapsed,
+			});
+			const groupNodesRect = {
+				x: first.position.x,
+				y: first.position.y,
+				width: second.position.x + DEFAULT_NODE_SIZE[0] - first.position.x,
+				height: sticky.position.y + stickyDimensions.height - first.position.y,
+			};
+			const group = createCanvasGraphGroupNode({
+				id: groupId,
+				nodeIds: ['first', 'second', 'sticky'],
+				isCollapsed,
+				nodesRect: groupNodesRect,
+				position: titleBarFromNodesRect(groupNodesRect, isCollapsed).position,
+			});
+			const visibleConnections: Array<[string, string]> = isCollapsed
+				? [['trigger', chipId]]
+				: [
+						['trigger', 'first'],
+						['first', 'second'],
+					];
+
+			const { layout } = createTestSetup(
+				[trigger, first, second, sticky, group],
+				visibleConnections,
+				undefined,
+				[
+					['trigger', 'first'],
+					['first', 'second'],
+				],
+			);
+			const result = layout('all');
+
+			const laidOutFirst = result.nodes.find((n) => n.id === 'first');
+			const laidOutSecond = result.nodes.find((n) => n.id === 'second');
+			const laidOutSticky = result.nodes.find((n) => n.id === 'sticky');
+			assert(laidOutFirst);
+			assert(laidOutSecond);
+			assert(laidOutSticky);
+
+			const memberBounds = {
+				x: Math.min(laidOutFirst.x, laidOutSecond.x),
+				y: Math.min(laidOutFirst.y, laidOutSecond.y),
+			};
+			expect(laidOutSecond.x - laidOutFirst.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
+			expect(laidOutSecond.y - laidOutFirst.y).toBe(0);
+			expect(laidOutSticky.x - memberBounds.x).toBe(sticky.position.x - groupNodesRect.x);
+			expect(laidOutSticky.y - memberBounds.y).toBe(sticky.position.y - groupNodesRect.y);
+			expect(matchesGrid(result)).toBe(true);
+		});
+
 		function createStickyOverGroupSetup(isCollapsed: boolean) {
 			const before = createCanvasGraphNode({ id: 'before', position: { x: 0, y: 0 } });
 			const m1 = createCanvasGraphNode({ id: 'm1', position: { x: 1008, y: 1008 } });
