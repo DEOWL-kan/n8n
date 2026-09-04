@@ -65,6 +65,8 @@ type CanvasLayoutTargetData = {
 	groupUnits: CanvasLayoutGroupUnit[];
 };
 
+type PositionedBox = { id: string; boundingBox: BoundingBox };
+
 interface CanvasLayoutGroupUnit {
 	node: GraphNode<CanvasGroupNodeData>;
 	memberIds: string[];
@@ -81,6 +83,11 @@ const SUBGRAPH_SPACING = GRID_SIZE * 8;
 const AI_X_SPACING = GRID_SIZE * 3;
 const AI_Y_SPACING = GRID_SIZE * 8;
 const STICKY_BOTTOM_PADDING = GRID_SIZE * 4;
+
+/** Moves a box by an offset without changing its size. */
+function translateBox(box: BoundingBox, offset: XYPosition): BoundingBox {
+	return { ...box, x: box.x + offset.x, y: box.y + offset.y };
+}
 
 export function useCanvasLayout(
 	canvasId: string,
@@ -573,18 +580,57 @@ export function useCanvasLayout(
 		return memberBoxes.length > 0 ? compositeBoundingBox(memberBoxes) : groupUnit.groupBox;
 	}
 
-	function layout(target: CanvasLayoutTarget): CanvasLayoutResult {
-		const { nodes, edges, groupUnits } = getTargetData(target);
-		const groupUnitBoundingBoxes = new Map(
-			groupUnits.map(({ node, boundingBox }) => [node.id, boundingBox]),
-		);
+	/**
+	 * Re-seats stickies over the nodes they covered: centered horizontally on the
+	 * covered nodes' new bounds, bottom-aligned with a little padding. Stickies
+	 * that cover nothing are left out; callers decide what to do with them.
+	 */
+	function placeStickies(
+		stickies: Array<GraphNode<CanvasNodeData>>,
+		positionedNodes: PositionedBox[],
+		getCoveredNodeIds: (stickyBox: BoundingBox) => Set<string>,
+	): PositionedBox[] {
+		return stickies
+			.map((sticky) => {
+				const stickyBox = boundingBoxFromCanvasNode(sticky);
+				const coveredNodeIds = getCoveredNodeIds(stickyBox);
+				const coveredBoxesAfter = positionedNodes
+					.filter(({ id }) => coveredNodeIds.has(id))
+					.map(({ boundingBox }) => boundingBox);
 
-		const nonStickyNodes = nodes.filter((node) => !isStickyCanvasNode(node));
-		const boundingBoxBefore = boundingBoxFromCanvasNodes(nonStickyNodes, groupUnitBoundingBoxes);
+				if (coveredBoxesAfter.length === 0) return null;
 
-		const parentGraph = createDagreGraph({ nodes: nonStickyNodes, edges, groupUnits });
+				const coveredNodesBoxAfter = compositeBoundingBox(coveredBoxesAfter);
+				return {
+					id: sticky.id,
+					boundingBox: {
+						x: centerHorizontally(coveredNodesBoxAfter, stickyBox),
+						y:
+							coveredNodesBoxAfter.y +
+							coveredNodesBoxAfter.height -
+							stickyBox.height +
+							STICKY_BOTTOM_PADDING,
+						height: stickyBox.height,
+						width: stickyBox.width,
+					},
+				};
+			})
+			.filter(isPresent);
+	}
+
+	/**
+	 * Places connectable nodes with dagre: connected components side by side,
+	 * AI sub-nodes hanging under their parent, components stacked vertically.
+	 * Group units enter as their reserved boxes. Returns a box per node id.
+	 */
+	function placeNodes({
+		nodes,
+		edges,
+		groupUnits,
+	}: CanvasLayoutTargetData): Record<string, BoundingBox> {
+		const parentGraph = createDagreGraph({ nodes, edges, groupUnits });
 		const nodeById: CanvasLayoutNodeDictionary = {};
-		for (const node of nonStickyNodes) {
+		for (const node of nodes) {
 			nodeById[node.id] = node;
 		}
 
@@ -727,6 +773,20 @@ export function useCanvasLayout(
 				}
 			});
 
+		return boundingBoxByNodeId;
+	}
+
+	function layout(target: CanvasLayoutTarget): CanvasLayoutResult {
+		const { nodes, edges, groupUnits } = getTargetData(target);
+		const groupUnitBoundingBoxes = new Map(
+			groupUnits.map(({ node, boundingBox }) => [node.id, boundingBox]),
+		);
+
+		const nonStickyNodes = nodes.filter((node) => !isStickyCanvasNode(node));
+		const boundingBoxBefore = boundingBoxFromCanvasNodes(nonStickyNodes, groupUnitBoundingBoxes);
+
+		const boundingBoxByNodeId = placeNodes({ nodes: nonStickyNodes, edges, groupUnits });
+
 		// Dagre centers a group's box on the connection axis, but the frame header,
 		// padding and any attached sticky put the members off that center. Slide the
 		// unit so the members sit on the axis, unless that would run into a neighbour.
@@ -759,7 +819,7 @@ export function useCanvasLayout(
 				.map((node) => [node.id, boundingBoxFromCanvasNode(node)]),
 		);
 
-		const attachedStickies: Array<{ id: string; boundingBox: BoundingBox }> = [];
+		const attachedStickies: PositionedBox[] = [];
 
 		// Move group members and attached stickies by the offset of their dagre box,
 		// then remove that box. The rendered group position is derived from its members.
@@ -777,22 +837,14 @@ export function useCanvasLayout(
 				if (!member) continue;
 				const box = boundingBoxFromCanvasNode(member);
 				boundingBoxBeforeById.set(memberId, box);
-				boundingBoxByNodeId[memberId] = {
-					x: box.x + delta.x,
-					y: box.y + delta.y,
-					width: box.width,
-					height: box.height,
-				};
+				boundingBoxByNodeId[memberId] = translateBox(box, delta);
 			}
 
 			for (const stickyId of groupUnit.stickyIds) {
 				const sticky = findNode<CanvasNodeData>(stickyId);
 				if (!sticky) continue;
 				const box = boundingBoxFromCanvasNode(sticky);
-				attachedStickies.push({
-					id: stickyId,
-					boundingBox: { ...box, x: box.x + delta.x, y: box.y + delta.y },
-				});
+				attachedStickies.push({ id: stickyId, boundingBox: translateBox(box, delta) });
 			}
 
 			delete boundingBoxByNodeId[groupUnit.node.id];
@@ -827,33 +879,9 @@ export function useCanvasLayout(
 			return coveredNodeIds;
 		}
 
-		const positionedStickies = stickies
-			.map((sticky) => {
-				const stickyBox = boundingBoxFromCanvasNode(sticky);
-				const coveredNodeIds = getCoveredNodeIds(stickyBox);
-				const coveredBoxesAfter = positionedNodes
-					.filter(({ id }) => coveredNodeIds.has(id))
-					.map(({ boundingBox }) => boundingBox);
-
-				if (coveredBoxesAfter.length === 0) return null;
-
-				const coveredNodesBoxAfter = compositeBoundingBox(coveredBoxesAfter);
-				return {
-					id: sticky.id,
-					boundingBox: {
-						x: centerHorizontally(coveredNodesBoxAfter, stickyBox),
-						y:
-							coveredNodesBoxAfter.y +
-							coveredNodesBoxAfter.height -
-							stickyBox.height +
-							STICKY_BOTTOM_PADDING,
-						height: stickyBox.height,
-						width: stickyBox.width,
-					},
-				};
-			})
-			.filter(isPresent)
-			.concat(attachedStickies);
+		const positionedStickies = placeStickies(stickies, positionedNodes, getCoveredNodeIds).concat(
+			attachedStickies,
+		);
 
 		const snapToGrid = (value: number) => Math.round(value / GRID_SIZE) * GRID_SIZE;
 
