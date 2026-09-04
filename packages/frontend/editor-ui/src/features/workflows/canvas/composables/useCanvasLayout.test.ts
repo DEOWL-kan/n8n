@@ -1,4 +1,5 @@
 import { useVueFlow, type GraphNode, type VueFlowStore } from '@vue-flow/core';
+import { NodeConnectionTypes } from 'n8n-workflow';
 import { computed, ref, shallowRef } from 'vue';
 import {
 	checkOverlap,
@@ -11,6 +12,7 @@ import {
 	createCanvasGraphNode,
 } from '@/features/workflows/canvas/__tests__/utils';
 import {
+	CanvasConnectionMode,
 	CanvasNodeRenderType,
 	createCanvasGroupNodeId,
 	type CanvasGroupNodeData,
@@ -18,7 +20,12 @@ import {
 } from '../canvas.types';
 import { useCanvasLayout, type CanvasLayoutResult } from './useCanvasLayout';
 import { STICKY_NODE_TYPE } from '@/app/constants';
-import { AGENT_NODE_SIZE, DEFAULT_NODE_SIZE, GRID_SIZE } from '@/app/utils/nodeViewUtils';
+import {
+	AGENT_NODE_SIZE,
+	DEFAULT_NODE_SIZE,
+	GRID_SIZE,
+	NODE_X_SPACING,
+} from '@/app/utils/nodeViewUtils';
 import type { INodeUi } from '@/Interface';
 import { computeGroupFrameRects, computeNodesRectFromStore } from './useCanvasMapping.groups';
 import {
@@ -32,13 +39,21 @@ function matchesGrid(result: CanvasLayoutResult) {
 	return result.nodes.every((node) => node.x % GRID_SIZE === 0 && node.y % GRID_SIZE === 0);
 }
 
+function isGraphCanvasNode(
+	node: GraphNode<CanvasNodeData> | GraphNode<CanvasGroupNodeData>,
+): node is GraphNode<CanvasNodeData> {
+	return 'connections' in node.data;
+}
+
 describe('useCanvasLayout', () => {
 	function createTestSetup(
 		nodes: Array<GraphNode<CanvasNodeData> | GraphNode<CanvasGroupNodeData>>,
 		connections: Array<[string, string]>,
 		selectedNodeIds?: string[],
+		canonicalConnections = connections,
 	) {
 		const nodesById = Object.fromEntries(nodes.map((node) => [node.id, node]));
+		seedCanonicalConnections(nodesById, canonicalConnections);
 		const edges = connections.map(([sourceId, targetId]) =>
 			createCanvasGraphEdge(nodesById[sourceId], nodesById[targetId]),
 		);
@@ -63,6 +78,32 @@ describe('useCanvasLayout', () => {
 		);
 
 		return { layout };
+	}
+
+	function seedCanonicalConnections(
+		nodesById: Record<string, GraphNode<CanvasNodeData> | GraphNode<CanvasGroupNodeData>>,
+		connections: Array<[string, string]>,
+	) {
+		for (const node of Object.values(nodesById)) {
+			if (isGraphCanvasNode(node)) node.data.name = node.id;
+		}
+
+		for (const [sourceId, targetId] of connections) {
+			const source = nodesById[sourceId];
+			const target = nodesById[targetId];
+			if (!source || !target || !isGraphCanvasNode(source) || !isGraphCanvasNode(target)) continue;
+
+			const outputConnections = source.data.connections[CanvasConnectionMode.Output];
+			const mainOutputConnections = outputConnections[NodeConnectionTypes.Main] ?? [];
+			const firstPortConnections = mainOutputConnections[0] ?? [];
+			outputConnections[NodeConnectionTypes.Main] = [
+				[
+					...firstPortConnections,
+					{ node: target.data.name, type: NodeConnectionTypes.Main, index: 0 },
+				],
+				...mainOutputConnections.slice(1),
+			];
+		}
 	}
 
 	test('should layout a basic workflow', () => {
@@ -449,10 +490,9 @@ describe('useCanvasLayout', () => {
 			});
 		}
 
-		function createCollapsedGroupSetup() {
-			// Use a grid-aligned gap so snap-to-grid preserves the relative spacing
-			const m1 = createCanvasGraphNode({ id: 'm1', position: { x: 1008, y: 1008 } });
-			const m2 = createCanvasGraphNode({ id: 'm2', position: { x: 1104, y: 1008 } });
+		function createCollapsedGroupSetup(selectedNodeIds?: string[]) {
+			const m1 = createCanvasGraphNode({ id: 'm1', position: { x: 1008, y: 1008 }, hidden: true });
+			const m2 = createCanvasGraphNode({ id: 'm2', position: { x: 960, y: 1200 }, hidden: true });
 			const before = createCanvasGraphNode({ id: 'before', position: { x: 0, y: 0 } });
 			const after = createCanvasGraphNode({ id: 'after', position: { x: 2000, y: 0 } });
 			const group = createCanvasGraphGroupNode({
@@ -468,8 +508,13 @@ describe('useCanvasLayout', () => {
 				['before', chipId],
 				[chipId, 'after'],
 			];
+			const canonicalConnections: Array<[string, string]> = [
+				['before', 'm1'],
+				['m1', 'm2'],
+				['m2', 'after'],
+			];
 
-			return createTestSetup(nodes, connections);
+			return createTestSetup(nodes, connections, selectedNodeIds, canonicalConnections);
 		}
 
 		function createExpandedGroupFrameSetup() {
@@ -508,7 +553,7 @@ describe('useCanvasLayout', () => {
 			return createTestSetup([...graphNodes, ...groupNodes], connections);
 		}
 
-		test('lays out a collapsed group as a unit, preserving member offsets and dropping the chip', () => {
+		test('lays out a collapsed group as a unit, tidies members and drops the chip', () => {
 			const { layout } = createCollapsedGroupSetup();
 			const result = layout('all');
 
@@ -523,8 +568,7 @@ describe('useCanvasLayout', () => {
 			assert(rm1);
 			assert(rm2);
 
-			// Members move as a block, keeping their relative offset.
-			expect(rm2.x - rm1.x).toBe(96);
+			expect(rm2.x - rm1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
 			expect(rm2.y - rm1.y).toBe(0);
 			expect(matchesGrid(result)).toBe(true);
 		});
@@ -546,7 +590,57 @@ describe('useCanvasLayout', () => {
 			expect(after.x).toBeGreaterThan(rm2.x);
 		});
 
-		test('keeps a top-left collapsed group anchored in place', () => {
+		test('tidies hidden members when a collapsed group chip is selected', () => {
+			const { layout } = createCollapsedGroupSetup([chipId]);
+			const result = layout('selection');
+
+			const ids = result.nodes.map((n) => n.id);
+			expect(ids).toEqual(['m1', 'm2']);
+
+			const rm1 = result.nodes.find((n) => n.id === 'm1');
+			const rm2 = result.nodes.find((n) => n.id === 'm2');
+			assert(rm1);
+			assert(rm2);
+			expect(rm2.x - rm1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
+			expect(rm2.y - rm1.y).toBe(0);
+		});
+
+		test('tidies a collapsed branch group selected by its hidden members', () => {
+			const first = createCanvasGraphNode({
+				id: 'first',
+				position: { x: -272, y: 320 },
+				hidden: true,
+			});
+			const second = createCanvasGraphNode({
+				id: 'second',
+				position: { x: 160, y: 144 },
+				hidden: true,
+			});
+			const group = createCanvasGraphGroupNode({
+				id: 'group',
+				nodeIds: ['first', 'second'],
+				isCollapsed: true,
+				nodesRect: { x: -272, y: 144, width: 528, height: 272 },
+				position: { x: -336, y: 48 },
+			});
+
+			const { layout } = createTestSetup(
+				[first, second, group],
+				[],
+				['first', 'second'],
+				[['first', 'second']],
+			);
+			const result = layout('selection');
+
+			const laidOutFirst = result.nodes.find((n) => n.id === 'first');
+			const laidOutSecond = result.nodes.find((n) => n.id === 'second');
+			assert(laidOutFirst);
+			assert(laidOutSecond);
+			expect(laidOutSecond.x - laidOutFirst.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
+			expect(laidOutSecond.y - laidOutFirst.y).toBe(0);
+		});
+
+		test('keeps a top-left collapsed group anchored in place while tidying contents', () => {
 			// Group owns the top-left corner, where the chip box (944, 908) and the
 			// member box (1008, 1008) disagree — the anchor must not absorb that gap.
 			const m1 = createCanvasGraphNode({ id: 'm1', position: { x: 1008, y: 1008 } });
@@ -564,13 +658,14 @@ describe('useCanvasLayout', () => {
 
 			const rm1 = result.nodes.find((n) => n.id === 'm1');
 			assert(rm1);
-			// A lone group has nothing to re-flow, so its members stay put.
+			// The title/member gap must not shift the group anchor.
 			expect(rm1).toMatchObject({ x: 1008, y: 1008 });
 		});
 
-		test('lays out an expanded group as a unit, preserving member offsets and dropping the chip', () => {
+		test('tidies the members of an expanded group and drops the chip', () => {
+			// m2 sits below-left of m1 although it is m1's successor.
 			const m1 = createCanvasGraphNode({ id: 'm1', position: { x: 1008, y: 1008 } });
-			const m2 = createCanvasGraphNode({ id: 'm2', position: { x: 1104, y: 1008 } });
+			const m2 = createCanvasGraphNode({ id: 'm2', position: { x: 960, y: 1200 } });
 			const group = createCanvasGraphGroupNode({
 				id: groupId,
 				nodeIds: ['m1', 'm2'],
@@ -594,7 +689,7 @@ describe('useCanvasLayout', () => {
 			const rm2 = result.nodes.find((n) => n.id === 'm2');
 			assert(rm1);
 			assert(rm2);
-			expect(rm2.x - rm1.x).toBe(96);
+			expect(rm2.x - rm1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
 			expect(rm2.y - rm1.y).toBe(0);
 			expect(matchesGrid(result)).toBe(true);
 		});
@@ -838,6 +933,7 @@ describe('useCanvasLayout', () => {
 
 				const { layout } = createTestSetup(nodes, [
 					['before', 'm1'],
+					['m1', 'm2'],
 					['m2', 'after'],
 				]);
 				const result = layout('all');
@@ -866,6 +962,7 @@ describe('useCanvasLayout', () => {
 			const nodes = [before, m1, m2, after, group];
 			const connections: Array<[string, string]> = [
 				['before', 'm1'],
+				['m1', 'm2'],
 				['m2', 'after'],
 			];
 
@@ -883,7 +980,7 @@ describe('useCanvasLayout', () => {
 
 			expect(beforeResult.x).toBeLessThan(rm1.x);
 			expect(afterResult.x).toBeGreaterThan(rm2.x);
-			expect(rm2.x - rm1.x).toBe(96);
+			expect(rm2.x - rm1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
 			expect(rm2.y - rm1.y).toBe(0);
 		});
 
@@ -903,13 +1000,23 @@ describe('useCanvasLayout', () => {
 			).toEqual([]);
 		});
 
-		test('uses the store nodes rect when spacing expanded group frames', () => {
+		test('spaces expanded group frames by the size of their tidied members', () => {
 			const source = createCanvasGraphNode({ id: 'source', position: { x: 0, y: 64 } });
-			const top = createCanvasGraphNode({ id: 'top', position: { x: 384, y: 0 } });
-			const bottom = createCanvasGraphNode({ id: 'bottom', position: { x: 384, y: 128 } });
+			// Both groups hold a tall agent card; their frames must not be spaced as
+			// if they held default-size nodes.
+			const agentData = {
+				render: { type: CanvasNodeRenderType.Agent, options: {} },
+			} as unknown as CanvasNodeData;
+			const top = createCanvasGraphNode({ id: 'top', position: { x: 384, y: 0 }, data: agentData });
+			const bottom = createCanvasGraphNode({
+				id: 'bottom',
+				position: { x: 384, y: 128 },
+				data: agentData,
+			});
 			const merge = createCanvasGraphNode({ id: 'merge', position: { x: 800, y: 64 } });
-			const topNodesRect = { x: 384, y: 0, width: 96, height: 1024 };
-			const bottomNodesRect = { x: 384, y: 128, width: 96, height: 1024 };
+			const memberSize = { width: AGENT_NODE_SIZE[0], height: AGENT_NODE_SIZE[1] };
+			const topNodesRect = { x: 384, y: 0, ...memberSize };
+			const bottomNodesRect = { x: 384, y: 128, ...memberSize };
 			const topFrame = computeGroupFrameRects(topNodesRect).expanded;
 			const bottomFrame = computeGroupFrameRects(bottomNodesRect).expanded;
 			const topGroup = createCanvasGraphGroupNode({
@@ -936,29 +1043,13 @@ describe('useCanvasLayout', () => {
 
 			const { layout } = createTestSetup(nodes, connections);
 			const result = layout('all');
-			const positions = new Map(result.nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
-			const shiftedFrame = (
-				group: GraphNode<CanvasGroupNodeData>,
-				member: GraphNode<CanvasNodeData>,
-			) => {
-				const memberPosition = positions.get(member.id);
-				assert(memberPosition);
-				const groupData = group.data;
-				assert(groupData);
-				const delta = {
-					x: memberPosition.x - member.position.x,
-					y: memberPosition.y - member.position.y,
-				};
-				return computeGroupFrameRects({
-					...groupData.nodesRect,
-					x: groupData.nodesRect.x + delta.x,
-					y: groupData.nodesRect.y + delta.y,
-				}).expanded;
+			const frameAfter = (memberId: string) => {
+				const position = result.nodes.find((node) => node.id === memberId);
+				assert(position);
+				return computeGroupFrameRects({ x: position.x, y: position.y, ...memberSize }).expanded;
 			};
 
-			expect(checkOverlap(shiftedFrame(topGroup, top), shiftedFrame(bottomGroup, bottom))).toBe(
-				false,
-			);
+			expect(checkOverlap(frameAfter('top'), frameAfter('bottom'))).toBe(false);
 		});
 
 		test('keeps expanded group members as plain nodes for a partial selection', () => {
@@ -991,7 +1082,7 @@ describe('useCanvasLayout', () => {
 			expect(afterResult.x).toBeGreaterThan(rm1.x);
 		});
 
-		test('preserves an AI subtree inside an expanded group as a block', () => {
+		test('tidies an AI subtree inside an expanded group like a top-level one', () => {
 			const before = createCanvasGraphNode({ id: 'before', position: { x: 0, y: 96 } });
 			const aiAgent = createCanvasGraphNode({
 				id: 'aiAgent',
@@ -1032,13 +1123,20 @@ describe('useCanvasLayout', () => {
 			const { layout } = createTestSetup(nodes, connections);
 			const result = layout('all');
 
+			const resultBefore = result.nodes.find((n) => n.id === 'before');
 			const resultAgent = result.nodes.find((n) => n.id === 'aiAgent');
 			const resultTool = result.nodes.find((n) => n.id === 'aiTool');
+			const resultAfter = result.nodes.find((n) => n.id === 'after');
+			assert(resultBefore);
 			assert(resultAgent);
 			assert(resultTool);
+			assert(resultAfter);
 
-			expect(resultTool.x - resultAgent.x).toBe(aiTool.position.x - aiAgent.position.x);
-			expect(resultTool.y - resultAgent.y).toBe(aiTool.position.y - aiAgent.position.y);
+			// The tool hangs below its agent, and the group stays between its neighbours.
+			expect(resultTool.y).toBeGreaterThan(resultAgent.y);
+			expect(resultBefore.x).toBeLessThan(resultAgent.x);
+			expect(resultAfter.x).toBeGreaterThan(resultAgent.x);
+			expect(matchesGrid(result)).toBe(true);
 		});
 
 		test('supports collapsed and expanded group units in the same layout', () => {
@@ -1064,10 +1162,12 @@ describe('useCanvasLayout', () => {
 			const nodes = [c1, c2, e1, e2, collapsedGroup, expandedGroup];
 			const connections: Array<[string, string]> = [
 				['group:collapsed', 'e1'],
+				['e1', 'e2'],
 				['e2', 'c1'],
 			];
+			const canonicalConnections: Array<[string, string]> = [...connections, ['c1', 'c2']];
 
-			const { layout } = createTestSetup(nodes, connections);
+			const { layout } = createTestSetup(nodes, connections, undefined, canonicalConnections);
 			const result = layout('all');
 
 			const ids = result.nodes.map((n) => n.id);
@@ -1083,9 +1183,9 @@ describe('useCanvasLayout', () => {
 			assert(re1);
 			assert(re2);
 
-			expect(rc2.x - rc1.x).toBe(96);
+			expect(rc2.x - rc1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
 			expect(rc2.y - rc1.y).toBe(0);
-			expect(re2.x - re1.x).toBe(96);
+			expect(re2.x - re1.x).toBe(DEFAULT_NODE_SIZE[0] + NODE_X_SPACING);
 			expect(re2.y - re1.y).toBe(0);
 		});
 	});
