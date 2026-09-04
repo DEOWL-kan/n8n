@@ -27,7 +27,11 @@ import {
 	NODE_X_SPACING,
 } from '@/app/utils/nodeViewUtils';
 import type { INodeUi } from '@/Interface';
-import { computeGroupFrameRects, computeNodesRectFromStore } from './useCanvasMapping.groups';
+import {
+	computeGroupFrameRects,
+	computeNodesRectFromStore,
+	titleBarFromNodesRect,
+} from './useCanvasMapping.groups';
 import {
 	computeNodeGroupLayoutPushes,
 	type NodeGroupLayoutComponent,
@@ -660,6 +664,141 @@ describe('useCanvasLayout', () => {
 			assert(rm1);
 			// The title/member gap must not shift the group anchor.
 			expect(rm1).toMatchObject({ x: 1008, y: 1008 });
+		});
+
+		test.each([
+			['expanded', false],
+			['collapsed', true],
+		])(
+			'is idempotent: tidying an already tidy canvas with %s groups moves nothing',
+			(_, isCollapsed) => {
+				const memberIds = ['approval-start', 'approval-done', 'billing-start', 'billing-done'];
+				const plainIds = ['source', ...memberIds, 'merge'];
+				const connections: Array<[string, string]> = [
+					['source', 'approval-start'],
+					['approval-start', 'approval-done'],
+					['approval-done', 'merge'],
+					['source', 'billing-start'],
+					['billing-start', 'billing-done'],
+					['billing-done', 'merge'],
+				];
+				// Builds the canvas the way the app renders it from stored positions.
+				const buildCanvas = (positions: Map<string, NodePosition>) => {
+					const graphNodes = plainIds.map((id) =>
+						createCanvasGraphNode({ id, position: positions.get(id) }),
+					);
+					const getNodeById = storeNodeLookup(positions);
+					const groupNodes = expandedGroups.map((group) => {
+						const nodesRect = computeNodesRectFromStore(group.nodeIds, getNodeById);
+						return createCanvasGraphGroupNode({
+							id: group.id,
+							nodeIds: [...group.nodeIds],
+							isCollapsed,
+							position: titleBarFromNodesRect(nodesRect, isCollapsed).position,
+							nodesRect,
+						});
+					});
+					const memberIdSet = new Set(memberIds);
+					const chipConnections = isCollapsed
+						? connections.map(([source, target]): [string, string] => [
+								memberIdSet.has(source) ? `group:${source.split('-')[0]}` : source,
+								memberIdSet.has(target) ? `group:${target.split('-')[0]}` : target,
+							])
+						: connections;
+					return createTestSetup(
+						[...graphNodes, ...groupNodes],
+						chipConnections.filter(([source, target]) => source !== target),
+						undefined,
+						connections,
+					);
+				};
+
+				const first = buildCanvas(
+					new Map([
+						['source', { x: 0, y: 120 }],
+						['approval-start', { x: 384, y: 0 }],
+						['approval-done', { x: 608, y: 0 }],
+						['billing-start', { x: 384, y: 320 }],
+						['billing-done', { x: 608, y: 320 }],
+						['merge', { x: 896, y: 120 }],
+					]),
+				).layout('all');
+				const second = buildCanvas(toPositions(first)).layout('all');
+
+				expect(toPositions(second)).toEqual(toPositions(first));
+			},
+		);
+
+		test('is idempotent with parallel groups when one group is collapsed', () => {
+			const groups = [
+				{ id: 'g1', nodeIds: ['branch-1-start', 'branch-1-done'], collapsed: false },
+				{ id: 'g2', nodeIds: ['branch-2-start', 'branch-2-done'], collapsed: false },
+				{ id: 'g3', nodeIds: ['branch-3-start', 'branch-3-done'], collapsed: true },
+			];
+			const connections: Array<[string, string]> = [
+				['source', 'branch-1-start'],
+				['branch-1-start', 'branch-1-done'],
+				['source', 'branch-2-start'],
+				['branch-2-start', 'branch-2-done'],
+				['source', 'branch-3-start'],
+				['branch-3-start', 'branch-3-done'],
+			];
+
+			const buildCanvas = (positions: Map<string, NodePosition>) => {
+				const getNodeById = storeNodeLookup(positions);
+				const groupNodes = groups.map((group) => {
+					const nodesRect = computeNodesRectFromStore(group.nodeIds, getNodeById);
+					return createCanvasGraphGroupNode({
+						id: group.id,
+						nodeIds: [...group.nodeIds],
+						isCollapsed: group.collapsed,
+						position: titleBarFromNodesRect(nodesRect, group.collapsed).position,
+						nodesRect,
+					});
+				});
+				const groupByMemberId = new Map(
+					groups
+						.filter((group) => group.collapsed)
+						.flatMap((group) => group.nodeIds.map((id) => [id, createCanvasGroupNodeId(group.id)])),
+				);
+				const visibleConnections = connections
+					.map(([source, target]): [string, string] => [
+						groupByMemberId.get(source) ?? source,
+						groupByMemberId.get(target) ?? target,
+					])
+					.filter(([source, target]) => source !== target);
+
+				return createTestSetup(
+					[
+						...[...positions].map(([id, position]) =>
+							createCanvasGraphNode({
+								id,
+								position,
+								hidden: groupByMemberId.has(id),
+							}),
+						),
+						...groupNodes,
+					],
+					visibleConnections,
+					undefined,
+					connections,
+				);
+			};
+
+			const first = buildCanvas(
+				new Map([
+					['source', { x: -560, y: -176 }],
+					['branch-1-start', { x: -272, y: -480 }],
+					['branch-1-done', { x: -48, y: -480 }],
+					['branch-2-start', { x: -272, y: -48 }],
+					['branch-2-done', { x: 384, y: 512 }],
+					['branch-3-start', { x: -272, y: 320 }],
+					['branch-3-done', { x: 160, y: 144 }],
+				]),
+			).layout('all');
+			const second = buildCanvas(toPositions(first)).layout('all');
+
+			expect(toPositions(second)).toEqual(toPositions(first));
 		});
 
 		test('tidies the members of an expanded group and drops the chip', () => {

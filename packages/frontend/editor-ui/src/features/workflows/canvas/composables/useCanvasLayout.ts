@@ -223,10 +223,13 @@ export function useCanvasLayout(
 
 		// A group is tidied on its own first; its frame then wraps that result.
 		const tidied = layoutGroupContent(members);
-		const frame = tidied?.frame ?? computeGroupFrameRects(groupData.nodesRect).expanded;
+		// Measure from the members' rect, not the title bar: that one is snapped to
+		// the grid, and an offset "before" box would shift every run's anchor.
+		const currentFrame = computeGroupFrameRects(groupData.nodesRect).expanded;
+		const frame = tidied?.frame ?? currentFrame;
 		const frameBox = {
-			x: groupNode.position.x,
-			y: groupNode.position.y,
+			x: currentFrame.x,
+			y: currentFrame.y,
 			width: frame.width,
 			height: frame.height,
 		};
