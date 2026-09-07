@@ -32,12 +32,14 @@ function assertHttpsHost(ctx: ILoadOptionsFunctions | ISupplyDataFunctions, host
 	}
 }
 
+interface ModelService {
+	name: string;
+	comment?: string;
+	supported_api_types?: string[];
+}
+
 interface ModelServicesResponse {
-	model_services?: Array<{
-		name: string;
-		comment?: string;
-		supported_api_types?: string[];
-	}>;
+	model_services?: ModelService[];
 	next_page_token?: string;
 }
 
@@ -49,7 +51,7 @@ async function searchModels(
 	assertHttpsHost(this, credentials.host);
 	const host = credentials.host.replace(/\/$/, '');
 
-	let services: NonNullable<ModelServicesResponse['model_services']> = [];
+	let services: ModelService[] = [];
 	let pageToken: string | undefined;
 	let pages = 0;
 	do {
@@ -63,6 +65,7 @@ async function searchModels(
 			{
 				method: 'GET',
 				url: `${host}/api/2.1/unity-catalog/model-services`,
+				// FULL view is needed for supported_api_types
 				qs: { view: 'FULL', page_token: pageToken },
 				headers: { Accept: 'application/json', 'User-Agent': CHAT_MODEL_USER_AGENT },
 				json: true,
@@ -73,10 +76,10 @@ async function searchModels(
 	} while (pageToken);
 
 	if (services.length === 0) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'No model services found - check that Unity AI Gateway is enabled on this workspace and that this credential has access to at least one model service',
-		);
+		throw new NodeOperationError(this.getNode(), 'No model services found', {
+			description:
+				'Check that Unity AI Gateway is enabled on this workspace and that this credential can access at least one model service',
+		});
 	}
 
 	// supplyData calls the openai/v1 chat route, so list only services that
@@ -86,13 +89,14 @@ async function searchModels(
 	);
 
 	if (chatServices.length === 0) {
-		throw new NodeOperationError(
-			this.getNode(),
-			'No chat-capable model services found - none of the visible model services supports openai/v1/chat/completions. Use ID mode to enter a service name directly.',
-		);
+		throw new NodeOperationError(this.getNode(), 'No chat-capable model services found', {
+			description:
+				'None of the visible model services supports openai/v1/chat/completions. Use ID mode to enter a service name directly',
+		});
 	}
 
 	const allResults = chatServices.map((service) => {
+		// The API returns the resource name; the gateway expects catalog.schema.service
 		const name = service.name.replace(/^model-services\//, '');
 		return { name, value: name, description: service.comment };
 	});
@@ -158,7 +162,7 @@ export class LmChatDatabricks implements INodeType {
 			getConnectionHintNoticeField([NodeConnectionTypes.AiChain, NodeConnectionTypes.AiAgent]),
 			{
 				displayName:
-					'If using JSON response format, you must include word "json" in the prompt in your chain or agent. Also, make sure the selected endpoint supports JSON mode.',
+					'If using JSON response format, you must include word "json" in the prompt in your chain or agent. Also, make sure the selected model service supports JSON mode.',
 				name: 'notice',
 				type: 'notice',
 				default: '',

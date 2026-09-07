@@ -346,12 +346,20 @@ describe('LmChatDatabricks', () => {
 			expect(result.results).toEqual([expect.objectContaining({ name: 'system.ai.gpt-oss-120b' })]);
 		});
 
-		it('should apply the substring filter to the description', async () => {
+		it('should apply the substring filter to the description, case-insensitively', async () => {
 			setupSearchContext('https://my.databricks.com', modelServicesResponse);
 
-			const result = await node.methods.listSearch.searchModels.call(mockContext, 'OpenAI');
+			const result = await node.methods.listSearch.searchModels.call(mockContext, 'openai');
 
 			expect(result.results).toEqual([expect.objectContaining({ name: 'system.ai.gpt-oss-120b' })]);
+		});
+
+		it('should return no results, not an error, when the filter matches nothing', async () => {
+			setupSearchContext('https://my.databricks.com', modelServicesResponse);
+
+			const result = await node.methods.listSearch.searchModels.call(mockContext, 'nomatch');
+
+			expect(result).toEqual({ results: [] });
 		});
 
 		it.each([{}, { model_services: [] }])(
