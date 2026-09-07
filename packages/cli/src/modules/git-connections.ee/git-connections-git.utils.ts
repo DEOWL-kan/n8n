@@ -2,6 +2,8 @@ import type { GitKeyGeneratorType } from '@n8n/api-types';
 import { resolveProxyUrl } from '@n8n/backend-network';
 import { generateKeyPairSync } from 'node:crypto';
 
+import { quoteShellArg } from '@/utils/quote-shell-arg';
+
 import {
 	HTTP_LOW_SPEED_LIMIT_BYTES,
 	HTTP_LOW_SPEED_TIME_SECONDS,
@@ -9,9 +11,6 @@ import {
 	SSH_SERVER_ALIVE_COUNT_MAX,
 	SSH_SERVER_ALIVE_INTERVAL_SECONDS,
 } from './constants';
-
-/** Quote a value for use as one POSIX shell argument. */
-const quoteShellArg = (value: string) => `'${value.replace(/'/g, "'\"'\"'")}'`;
 
 /**
  * Build the Git configuration for an HTTPS connection.
