@@ -7,6 +7,7 @@ import {
 	N8nSettingsRow,
 	N8nSettingsRowGroup,
 	N8nSettingsSection,
+	N8nTabs,
 	N8nText,
 } from '@n8n/design-system';
 import { useI18n } from '@n8n/i18n';
@@ -19,6 +20,10 @@ import PageViewLayout from '@/app/components/layouts/PageViewLayout.vue';
 import { useUIStore } from '@/app/stores/ui.store';
 import AppBreadcrumbs from '@/features/apps/AppBreadcrumbs.vue';
 import PageCard from '@/features/apps/PageCard.vue';
+import AppPreviewFrame from '@/features/apps/components/AppPreviewFrame.vue';
+import AppBuilderModeToggle, {
+	type BuilderMode,
+} from '@/features/apps/components/AppBuilderModeToggle.vue';
 import { useAppsStore } from '@/features/apps/apps.store';
 import { useAppDeletion } from '@/features/apps/useAppDeletion';
 import { ADD_PAGE_MODAL_KEY, APP_DETAILS, APP_PAGE_DETAILS } from '@/features/apps/apps.constants';
@@ -30,6 +35,10 @@ import {
 	getPageUrl,
 } from '@/features/apps/pageTree.utils';
 import { useDocumentTitle } from '@/app/composables/useDocumentTitle';
+
+type BuilderTab = 'build' | 'code';
+const mode = ref<BuilderMode>('settings');
+const activeTab = ref<BuilderTab>('build');
 
 const props = defineProps<{
 	projectId: string;
@@ -45,6 +54,11 @@ const documentTitle = useDocumentTitle();
 const { confirmAndDeletePage } = useAppDeletion();
 
 const appsStore = useAppsStore();
+
+const tabOptions = computed(() => [
+	{ label: i18n.baseText('apps.page.tabs.build'), value: 'build' as BuilderTab },
+	{ label: i18n.baseText('apps.page.tabs.code'), value: 'code' as BuilderTab },
+]);
 
 const app = ref<App | null>(null);
 const route = ref('');
@@ -162,6 +176,7 @@ watch(() => props.pageId, initialize);
 					:current-page-id="pageId"
 				/>
 				<div v-if="app" :class="$style.headerActions">
+					<AppBuilderModeToggle v-model="mode" />
 					<N8nButton :loading="saving" data-test-id="page-save" @click="onSave">
 						{{ i18n.baseText('apps.page.save') }}
 					</N8nButton>
@@ -178,85 +193,102 @@ watch(() => props.pageId, initialize);
 		</template>
 
 		<div :class="$style.container">
-			<div v-if="app" :class="$style.urlCard">
-				<CopyInput
-					:label="i18n.baseText('apps.page.url.label')"
-					:value="pageUrl"
-					data-test-id="page-url"
-				/>
-			</div>
+			<AppPreviewFrame v-if="mode === 'preview'" :page-url="pageUrl" />
 
-			<N8nSettingsSection>
-				<N8nSettingsRowGroup>
-					<N8nSettingsRow
-						:title="i18n.baseText('apps.page.input.route.label')"
-						:description="i18n.baseText('apps.page.add.input.route.hint')"
-						:max-description-lines="3"
-					>
-						<template #action>
-							<N8nInput
-								v-model="route"
-								:placeholder="i18n.baseText('apps.page.add.input.route.placeholder')"
-								data-test-id="page-route-input"
-							/>
-						</template>
-					</N8nSettingsRow>
-					<N8nSettingsRow
-						:title="i18n.baseText('apps.page.input.dataWorkflow.label')"
-						:description="i18n.baseText('apps.page.input.dataWorkflow.hint')"
-						:max-description-lines="3"
-					>
-						<template #action>
-							<N8nSelect
-								v-model="dataWorkflowId"
-								clearable
-								filterable
-								:placeholder="i18n.baseText('apps.page.input.dataWorkflow.placeholder')"
-								data-test-id="page-data-workflow-select"
+			<template v-else>
+				<N8nTabs
+					v-model="activeTab"
+					:options="tabOptions"
+					:class="$style.tabs"
+					data-test-id="page-builder-tabs"
+				/>
+
+				<div v-if="activeTab === 'build'" :class="$style.tabPanel" data-test-id="page-tab-build">
+					<div v-if="app" :class="$style.urlCard">
+						<CopyInput
+							:label="i18n.baseText('apps.page.url.label')"
+							:value="pageUrl"
+							data-test-id="page-url"
+						/>
+					</div>
+
+					<N8nSettingsSection>
+						<N8nSettingsRowGroup>
+							<N8nSettingsRow
+								:title="i18n.baseText('apps.page.input.route.label')"
+								:description="i18n.baseText('apps.page.add.input.route.hint')"
+								:max-description-lines="3"
 							>
-								<N8nOption
-									v-for="option in appsStore.dataWorkflowOptions"
-									:key="option.id"
-									:value="option.id"
-									:label="option.name"
-								/>
-							</N8nSelect>
-						</template>
-					</N8nSettingsRow>
-				</N8nSettingsRowGroup>
-			</N8nSettingsSection>
+								<template #action>
+									<N8nInput
+										v-model="route"
+										:placeholder="i18n.baseText('apps.page.add.input.route.placeholder')"
+										data-test-id="page-route-input"
+									/>
+								</template>
+							</N8nSettingsRow>
+							<N8nSettingsRow
+								:title="i18n.baseText('apps.page.input.dataWorkflow.label')"
+								:description="i18n.baseText('apps.page.input.dataWorkflow.hint')"
+								:max-description-lines="3"
+							>
+								<template #action>
+									<N8nSelect
+										v-model="dataWorkflowId"
+										clearable
+										filterable
+										:placeholder="i18n.baseText('apps.page.input.dataWorkflow.placeholder')"
+										data-test-id="page-data-workflow-select"
+									>
+										<N8nOption
+											v-for="option in appsStore.dataWorkflowOptions"
+											:key="option.id"
+											:value="option.id"
+											:label="option.name"
+										/>
+									</N8nSelect>
+								</template>
+							</N8nSettingsRow>
+						</N8nSettingsRowGroup>
+					</N8nSettingsSection>
 
-			<div :class="$style.content" data-test-id="page-content-placeholder">
-				<N8nText color="text-light">{{ i18n.baseText('apps.page.content.placeholder') }}</N8nText>
-			</div>
+					<div :class="$style.header">
+						<N8nText tag="h2" size="medium" bold>{{ i18n.baseText('apps.page.subPages') }}</N8nText>
+						<N8nButton
+							v-if="route"
+							size="small"
+							data-test-id="page-add-child"
+							@click="openAddPageModal(pageId)"
+						>
+							{{ i18n.baseText('apps.page.new') }}
+						</N8nButton>
+					</div>
 
-			<div :class="$style.header">
-				<N8nText tag="h2" size="medium" bold>{{ i18n.baseText('apps.page.subPages') }}</N8nText>
-				<N8nButton
-					v-if="route"
-					size="small"
-					data-test-id="page-add-child"
-					@click="openAddPageModal(pageId)"
-				>
-					{{ i18n.baseText('apps.page.new') }}
-				</N8nButton>
-			</div>
+					<N8nText v-if="childPages.length === 0" color="text-light">
+						{{ i18n.baseText('apps.pages.empty') }}
+					</N8nText>
 
-			<N8nText v-if="childPages.length === 0" color="text-light">
-				{{ i18n.baseText('apps.pages.empty') }}
-			</N8nText>
+					<div :class="$style.pageGrid">
+						<PageCard
+							v-for="page in childPages"
+							:key="page.id"
+							:page="page"
+							:child-count="childCounts.get(page.id) ?? 0"
+							@open="openPage"
+							@add-child="openAddPageModal"
+							@delete="onDeleteChildPage"
+						/>
+					</div>
+				</div>
 
-			<div :class="$style.pageGrid">
-				<PageCard
-					v-for="page in childPages"
-					:key="page.id"
-					:page="page"
-					:child-count="childCounts.get(page.id) ?? 0"
-					@open="openPage"
-					@add-child="openAddPageModal"
-					@delete="onDeleteChildPage"
-				/>
-			</div>
+				<div v-else :class="$style.tabPanel" data-test-id="page-tab-code">
+					<div :class="$style.content" data-test-id="page-content-placeholder">
+						<N8nText color="text-light">{{
+							i18n.baseText('apps.page.content.placeholder')
+						}}</N8nText>
+					</div>
+				</div>
+			</template>
 		</div>
 	</PageViewLayout>
 </template>
@@ -280,6 +312,18 @@ watch(() => props.pageId, initialize);
 	gap: var(--spacing--sm);
 	width: 100%;
 	padding-bottom: var(--spacing--lg);
+}
+
+.tabs {
+	margin-bottom: var(--spacing--sm);
+}
+
+.tabPanel {
+	display: flex;
+	flex-direction: column;
+	gap: var(--spacing--sm);
+	width: 100%;
+	margin-bottom: var(--spacing--lg);
 }
 
 .urlCard {

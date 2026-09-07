@@ -10,12 +10,18 @@ import PageViewLayout from '@/app/components/layouts/PageViewLayout.vue';
 import { useUIStore } from '@/app/stores/ui.store';
 import AppBreadcrumbs from '@/features/apps/AppBreadcrumbs.vue';
 import PageCard from '@/features/apps/PageCard.vue';
+import AppPreviewFrame from '@/features/apps/components/AppPreviewFrame.vue';
+import AppBuilderModeToggle, {
+	type BuilderMode,
+} from '@/features/apps/components/AppBuilderModeToggle.vue';
 import { useAppsStore } from '@/features/apps/apps.store';
 import { useAppDeletion } from '@/features/apps/useAppDeletion';
 import { ADD_PAGE_MODAL_KEY, APP_PAGE_DETAILS, PROJECT_APPS } from '@/features/apps/apps.constants';
 import type { App } from '@/features/apps/apps.types';
 import { getChildCounts } from '@/features/apps/pageTree.utils';
 import { useDocumentTitle } from '@/app/composables/useDocumentTitle';
+
+const mode = ref<BuilderMode>('settings');
 
 const props = defineProps<{
 	projectId: string;
@@ -98,49 +104,55 @@ watch(() => props.appId, initialize);
 		<template #header>
 			<div :class="$style.breadcrumbsRow">
 				<AppBreadcrumbs v-if="app" :project-id="projectId" :app-id="appId" :app-name="app.name" />
-				<N8nButton
-					v-if="app"
-					icon-only
-					icon="trash-2"
-					variant="subtle"
-					:aria-label="i18n.baseText('generic.delete')"
-					data-test-id="app-delete"
-					@click="onDeleteApp"
-				/>
+				<div v-if="app" :class="$style.headerActions">
+					<AppBuilderModeToggle v-model="mode" />
+					<N8nButton
+						icon-only
+						icon="trash-2"
+						variant="subtle"
+						:aria-label="i18n.baseText('generic.delete')"
+						data-test-id="app-delete"
+						@click="onDeleteApp"
+					/>
+				</div>
 			</div>
 		</template>
 
 		<div :class="$style.container">
-			<div v-if="app" :class="$style.urlCard">
-				<CopyInput
-					:label="i18n.baseText('apps.url.label')"
-					:value="appUrl"
-					data-test-id="app-url"
-				/>
-			</div>
+			<AppPreviewFrame v-if="mode === 'preview'" :page-url="appUrl" />
 
-			<div :class="$style.header">
-				<N8nText tag="h2" size="medium" bold>{{ i18n.baseText('apps.pages') }}</N8nText>
-				<N8nButton size="small" data-test-id="app-page-add-root" @click="openAddPageModal(null)">
-					{{ i18n.baseText('apps.page.new') }}
-				</N8nButton>
-			</div>
+			<template v-else>
+				<div v-if="app" :class="$style.urlCard">
+					<CopyInput
+						:label="i18n.baseText('apps.url.label')"
+						:value="appUrl"
+						data-test-id="app-url"
+					/>
+				</div>
 
-			<N8nText v-if="rootPages.length === 0" color="text-light">
-				{{ i18n.baseText('apps.pages.empty') }}
-			</N8nText>
+				<div :class="$style.header">
+					<N8nText tag="h2" size="medium" bold>{{ i18n.baseText('apps.pages') }}</N8nText>
+					<N8nButton size="small" data-test-id="app-page-add-root" @click="openAddPageModal(null)">
+						{{ i18n.baseText('apps.page.new') }}
+					</N8nButton>
+				</div>
 
-			<div :class="$style.pageGrid">
-				<PageCard
-					v-for="page in rootPages"
-					:key="page.id"
-					:page="page"
-					:child-count="childCounts.get(page.id) ?? 0"
-					@open="openPage"
-					@add-child="openAddPageModal"
-					@delete="onDeletePage"
-				/>
-			</div>
+				<N8nText v-if="rootPages.length === 0" color="text-light">
+					{{ i18n.baseText('apps.pages.empty') }}
+				</N8nText>
+
+				<div :class="$style.pageGrid">
+					<PageCard
+						v-for="page in rootPages"
+						:key="page.id"
+						:page="page"
+						:child-count="childCounts.get(page.id) ?? 0"
+						@open="openPage"
+						@add-child="openAddPageModal"
+						@delete="onDeletePage"
+					/>
+				</div>
+			</template>
 		</div>
 	</PageViewLayout>
 </template>
@@ -150,6 +162,12 @@ watch(() => props.appId, initialize);
 	display: flex;
 	align-items: flex-start;
 	justify-content: space-between;
+}
+
+.headerActions {
+	display: flex;
+	align-items: center;
+	gap: var(--spacing--2xs);
 }
 
 .container {
