@@ -461,8 +461,6 @@ export {
 	PromotionProviderListPublicDto,
 	PromotionProviderPublicDto,
 	UpdatePromotionProviderDto,
-	promotionGitAuthInputSchemas,
-	promotionGitAuthUpdateSchemas,
 	promotionGitConfigSchemas,
 	promotionGitSshKeyAuthInputSchema,
 	promotionGitSshKeyAuthUpdateSchema,
