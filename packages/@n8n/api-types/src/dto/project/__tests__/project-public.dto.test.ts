@@ -1,6 +1,7 @@
 import {
 	CreatedProjectPublicDto,
 	CreateProjectPublicDto,
+	DeleteProjectQueryPublicDto,
 	ListProjectsQueryPublicDto,
 	ProjectListPublicDto,
 	ProjectPublicDto,
@@ -162,5 +163,18 @@ describe('ListProjectsQueryPublicDto', () => {
 
 	test('rejects a non-numeric limit', () => {
 		expect(ListProjectsQueryPublicDto.safeParse({ limit: 'abc' }).success).toBe(false);
+	});
+});
+
+describe('DeleteProjectQueryPublicDto', () => {
+	test('accepts an empty query', () => {
+		expect(DeleteProjectQueryPublicDto.safeParse({}).success).toBe(true);
+	});
+
+	test('rejects any query parameter', () => {
+		const result = DeleteProjectQueryPublicDto.safeParse({ transferId: 'abc' });
+
+		expect(result.success).toBe(false);
+		expect(result.error?.issues[0].code).toBe('unrecognized_keys');
 	});
 });
