@@ -34,6 +34,7 @@ export class SharedWorkflowRepository extends BaseRepository<SharedWorkflow> {
 		return sharedWorkflows.map((sharing) => sharing.workflowId);
 	}
 
+<<<<<<< HEAD
 	async findByWorkflowIds(workflowIds: string[]) {
 		return await this.find({
 			where: {
@@ -44,6 +45,8 @@ export class SharedWorkflowRepository extends BaseRepository<SharedWorkflow> {
 		});
 	}
 
+=======
+>>>>>>> 1ab93827 (perf(core): Bound peak memory during source control push (#37862))
 	/** Owner project of each workflow, keyed by workflow id. */
 	async findOwnerProjectsByWorkflowIds(workflowIds: string[]): Promise<Map<string, Project>> {
 		const ownerRows = await this.find({
