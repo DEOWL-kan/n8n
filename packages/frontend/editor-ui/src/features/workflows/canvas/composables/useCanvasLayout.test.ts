@@ -1146,6 +1146,16 @@ describe('useCanvasLayout', () => {
 		});
 
 		test('leaves a sticky note out when it also covers a partial group member', () => {
+			const groupOnly = createStickyOverParallelGroupsSetup({
+				x: 496,
+				y: -64,
+				width: 464,
+				height: 352,
+			}).layout('selection', {
+				nodeIdsFilter: ['approval-start', 'approval-done'],
+			});
+			expect(groupOnly.nodes.map((node) => node.id)).toContain('sticky');
+
 			const { layout } = createStickyOverParallelGroupsSetup({
 				x: 480,
 				y: -80,
