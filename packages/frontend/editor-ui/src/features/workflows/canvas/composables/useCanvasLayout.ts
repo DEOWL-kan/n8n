@@ -68,6 +68,7 @@ type CanvasLayoutTargetData = {
 };
 
 type PositionedBox = { id: string; boundingBox: BoundingBox };
+type GroupBox = { id: string; box: BoundingBox };
 
 /** A group's members tidied on their own, measured from the frame's top-left. */
 interface CanvasLayoutGroupContent {
@@ -132,13 +133,22 @@ export function useCanvasLayout(
 			.map((groupNode) => getGroupUnitForTarget(groupNode, sourceNodeIds))
 			.filter(isPresent);
 		const groupedMemberIds = new Set(groupUnits.flatMap(({ memberIds }) => memberIds));
+		const allGroupMemberIds = new Set(
+			allNodes.value
+				.filter(isCanvasGroupNode)
+				.flatMap((groupNode) => groupNode.data?.group.nodeIds ?? []),
+		);
+		const externalNodes = allNodes.value.filter(
+			(node) => !isCanvasGroupNode(node) && !node.hidden && !allGroupMemberIds.has(node.id),
+		);
+		const groupBoxes = allNodes.value.filter(isCanvasGroupNode).map(getCurrentGroupBox);
 
 		// Grouped members move with their group box after dagre runs.
 		const regularNodes = source.filter(
 			(node) => !isCanvasGroupNode(node) && !node.hidden && !groupedMemberIds.has(node.id),
 		);
 
-		const unitsWithStickies = attachCoveringStickies(groupUnits, regularNodes);
+		const unitsWithStickies = attachCoveringStickies(groupUnits, externalNodes, groupBoxes);
 		const attachedStickyIds = new Set(unitsWithStickies.flatMap(({ stickyIds }) => stickyIds));
 
 		return {
@@ -151,6 +161,14 @@ export function useCanvasLayout(
 		};
 	}
 
+	function getCurrentGroupBox(groupNode: GraphNode<CanvasGroupNodeData>): GroupBox {
+		const frameRects = computeGroupFrameRects(groupNode.data.nodesRect);
+		return {
+			id: groupNode.id,
+			box: groupNode.data.isCollapsed ? frameRects.collapsed : frameRects.expanded,
+		};
+	}
+
 	/**
 	 * Folds a sticky that covers exactly one group, and nothing else, into that
 	 * group's layout unit. Dagre then reserves room for the sticky too, so it
@@ -158,24 +176,29 @@ export function useCanvasLayout(
 	 */
 	function attachCoveringStickies(
 		groupUnits: CanvasLayoutGroupUnit[],
-		regularNodes: CanvasLayoutNode[],
+		externalNodes: CanvasLayoutNode[],
+		groupBoxes: GroupBox[],
 	): CanvasLayoutGroupUnit[] {
-		const stickies = regularNodes.filter(isStickyCanvasNode);
+		const stickies = externalNodes.filter(isStickyCanvasNode);
 		if (stickies.length === 0 || groupUnits.length === 0) return groupUnits;
 
-		const plainNodeBoxes = regularNodes
+		const plainNodeBoxes = externalNodes
 			.filter((node) => !isStickyCanvasNode(node))
 			.map((node) => boundingBoxFromCanvasNode(node));
+		const groupUnitIds = new Set(groupUnits.map(({ node }) => node.id));
 
 		const stickiesByUnitId = new Map<string, Array<{ id: string; box: BoundingBox }>>();
 		for (const sticky of stickies) {
 			const stickyBox = boundingBoxFromCanvasNode(sticky);
 			if (plainNodeBoxes.some((box) => isCoveredBy(stickyBox, box))) continue;
 
-			const coveredUnits = groupUnits.filter(({ groupBox }) => isCoveredBy(stickyBox, groupBox));
-			if (coveredUnits.length !== 1) continue;
+			const coveredGroupIds = groupBoxes
+				.filter(({ box }) => isCoveredBy(stickyBox, box))
+				.map(({ id }) => id);
+			if (coveredGroupIds.length !== 1) continue;
 
-			const unitId = coveredUnits[0].node.id;
+			const unitId = coveredGroupIds[0];
+			if (!groupUnitIds.has(unitId)) continue;
 			stickiesByUnitId.set(unitId, [
 				...(stickiesByUnitId.get(unitId) ?? []),
 				{ id: sticky.id, box: stickyBox },

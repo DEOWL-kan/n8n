@@ -955,6 +955,26 @@ describe('useCanvasLayout', () => {
 			expect(sticky.y + 600).toBeGreaterThanOrEqual(rm1.y + DEFAULT_NODE_SIZE[1]);
 		});
 
+		test.each([
+			['an expanded', false],
+			['a collapsed', true],
+		])('moves a sticky note covering %s group when tidying only that group', (_, isCollapsed) => {
+			const { layout } = createStickyOverGroupSetup(isCollapsed);
+			const result = layout('selection', { nodeIdsFilter: ['m1', 'm2'] });
+
+			const sticky = result.nodes.find((n) => n.id === 'sticky');
+			const rm1 = result.nodes.find((n) => n.id === 'm1');
+			const rm2 = result.nodes.find((n) => n.id === 'm2');
+			assert(sticky);
+			assert(rm1);
+			assert(rm2);
+
+			expect(sticky.x).toBeLessThanOrEqual(rm1.x);
+			expect(sticky.x + 800).toBeGreaterThanOrEqual(rm2.x + DEFAULT_NODE_SIZE[0]);
+			expect(sticky.y).toBeLessThanOrEqual(rm1.y);
+			expect(sticky.y + 600).toBeGreaterThanOrEqual(rm1.y + DEFAULT_NODE_SIZE[1]);
+		});
+
 		test('leaves a sticky note alone when it covers no node or group', () => {
 			const { layout } = createTestSetup(
 				[
@@ -1107,6 +1127,22 @@ describe('useCanvasLayout', () => {
 					}),
 				).toBe(true);
 			}
+		});
+
+		test('leaves a shared sticky note out when tidying only one covered group', () => {
+			// Covers the trigger and the approval frame
+			const { layout } = createStickyOverParallelGroupsSetup({
+				x: 200,
+				y: -400,
+				width: 800,
+				height: 800,
+			});
+
+			const result = layout('selection', {
+				nodeIdsFilter: ['approval-start', 'approval-done'],
+			});
+
+			expect(result.nodes.map((node) => node.id)).not.toContain('sticky');
 		});
 
 		test.each([
