@@ -232,6 +232,15 @@ function extractHttpStatus(error: unknown): string | undefined {
  * body is safe to send twice. Never wrap a multipart upload: its stream is
  * already consumed.
  */
+
+// credentialId → epoch ms of the last forced accessible-resources refresh. A real token
+// refresh completes well under this window, so a 404/403 this soon after one means the
+// token is already current and the failure is a genuine missing resource, not expiry.
+// Without this, a batch of many missing resources in one execution forces a refresh per
+// item instead of once, multiplying calls to Atlassian's accessible-resources endpoint.
+const lastForcedRefreshAt = new Map<string, number>();
+const FORCED_REFRESH_DEBOUNCE_MS = 5_000;
+
 export async function retryOnceIfTokenExpired<T>(
 	ctx: AtlassianContext,
 	credentialType: string,
@@ -243,7 +252,12 @@ export async function retryOnceIfTokenExpired<T>(
 		const httpCode = extractHttpStatus(error);
 		if (httpCode !== '404' && httpCode !== '403') throw error;
 
-		await fetchAtlassianAccessibleResources.call(ctx, credentialType, { bypassCache: true });
+		const credentialId = ctx.getNode().credentials?.[credentialType]?.id;
+		const lastForced = credentialId ? lastForcedRefreshAt.get(credentialId) : undefined;
+		if (lastForced === undefined || Date.now() - lastForced >= FORCED_REFRESH_DEBOUNCE_MS) {
+			if (credentialId) lastForcedRefreshAt.set(credentialId, Date.now());
+			await fetchAtlassianAccessibleResources.call(ctx, credentialType, { bypassCache: true });
+		}
 		return await request();
 	}
 }
