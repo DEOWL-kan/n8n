@@ -100,23 +100,6 @@ export { PushWorkFolderRequestDto } from './source-control/push-work-folder-requ
 export { type GitCommitInfo } from './source-control/push-work-folder-response.dto';
 export { SourceControlStatusQueryPublicDto } from './source-control/source-control-status-query-public.dto';
 export { SourceControlStatusPublicDto } from './source-control/source-control-status-public.dto';
-export {
-	CloneGitConnectionDto,
-	CreateGitConnectionDto,
-	GitConnectionListPublicDto,
-	GitConnectionProjectListPublicDto,
-	GitConnectionProjectPublicDto,
-	GitConnectionPublicDto,
-	GitConnectionPullResultDto,
-	GitConnectionPushResultDto,
-	ListGitConnectionsQueryDto,
-	PushGitConnectionDto,
-	UpdateGitConnectionDto,
-	gitConnectionTypeSchema,
-	gitKeyGeneratorTypeSchema,
-	type GitConnectionType,
-	type GitKeyGeneratorType,
-} from './git-connections/git-connections.dto';
 
 export { CreateCredentialDto } from './credentials/create-credential.dto';
 export { VariableListRequestDto } from './variables/variables-list-request.dto';
@@ -499,6 +482,10 @@ export {
 	type PromotionConnectionConfigsPublic,
 	type PromotionDirection,
 } from './promotions/promotion-config.dto';
+export {
+	PromotionCheckoutPublicDto,
+	promotionCheckoutPublicSchema,
+} from './promotions/promotion-checkout.dto';
 export {
 	CreatePromotionConnectionDto,
 	ListPromotionConnectionsQueryDto,
