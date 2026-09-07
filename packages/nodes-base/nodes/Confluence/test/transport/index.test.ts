@@ -21,7 +21,9 @@ const siteByUrl = (url: string) => ({ __rl: true, mode: 'url', value: url });
 
 // The OAuth2 credential is OAuth2-parented, so its expired-token retry happens inside
 // core's requestOAuth2 (via this option), not in this file — see oauth.test.ts.
-const OAUTH2_TOKEN_EXPIRED_STATUS_CODES = { oauth2: { tokenExpiredStatusCode: [403, 404] } };
+const OAUTH2_TOKEN_EXPIRED_STATUS_CODES = {
+	oauth2: { tokenExpiredStatusCode: [401, 403, 404], refreshOnlyIfTokenExpired: true },
+};
 
 // Simulates a genuinely (not-expiry-related) failing gateway call: accessible-resources
 // keeps succeeding (so a forced refresh is a no-op) while every actual gateway
@@ -196,7 +198,7 @@ describe('confluenceApiRequest', () => {
 	// option reaches it — exercised end-to-end in oauth.test.ts's
 	// "requestOAuth2 - tokenExpiredStatusCode" suite. This only pins that the option is
 	// actually passed through from this call site.
-	it('passes tokenExpiredStatusCode: [403, 404] so core retries the gateway 404/403 quirk', async () => {
+	it('passes tokenExpiredStatusCode: [401, 403, 404] so core retries the gateway 404/403 quirk', async () => {
 		await confluenceApiRequest.call(ctx, 'GET', '/wiki/api/v2/pages');
 
 		expect(mockHttpRequestWithAuthentication).toHaveBeenNthCalledWith(
@@ -467,7 +469,7 @@ describe('confluenceApiRequestBinary', () => {
 
 	// Same as confluenceApiRequest: the OAuth2 credential's expired-token retry now
 	// happens inside core (oauth.test.ts covers it); this only pins the option is passed.
-	it('passes tokenExpiredStatusCode: [403, 404] so core retries the gateway 404/403 quirk', async () => {
+	it('passes tokenExpiredStatusCode: [401, 403, 404] so core retries the gateway 404/403 quirk', async () => {
 		const bytes = Buffer.from('file-bytes');
 		mockHttpRequestWithAuthentication
 			.mockResolvedValueOnce(accessibleResources)

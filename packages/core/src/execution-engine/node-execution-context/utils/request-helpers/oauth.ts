@@ -326,6 +326,19 @@ export function isTokenExpiredStatusCode(
 		: status === tokenExpiredStatusCode;
 }
 
+/** Refresh a little before the stored expiry, so a token that dies mid-request still refreshes. */
+const TOKEN_EXPIRY_BUFFER_MS = 60_000;
+
+/**
+ * Whether the stored token still has time left on it. An absent or unparsable expiry counts as
+ * expired, so a caller that opted into `refreshOnlyIfTokenExpired` keeps refreshing when the
+ * expiry is unknown.
+ */
+function isStoredTokenUnexpired(credentials: OAuth2CredentialData): boolean {
+	const expiresAt = Number(credentials.oauthTokenData?.n8n_expires_at);
+	return Number.isFinite(expiresAt) && Date.now() + TOKEN_EXPIRY_BUFFER_MS < expiresAt;
+}
+
 function isSingleUseValue(value: unknown): boolean {
 	return isFormDataInstance(value) || value instanceof Stream;
 }
@@ -472,6 +485,19 @@ export async function requestOAuth2(
 	const tokenExpiredStatusCode = resolveTokenExpiredStatusCode(oAuth2Options, credentials);
 	const shouldSkipTokenRefresh = oAuth2Options?.skipTokenRefresh === true;
 
+	/**
+	 * A 401 means the server rejected the token, so it always earns a refresh. Any other
+	 * configured status can be ambiguous (a gateway that answers 404 for both an expired token
+	 * and a missing page), so `refreshOnlyIfTokenExpired` lets a caller ask for the stored
+	 * expiry to be checked first, instead of paying a refresh per missing item.
+	 */
+	const shouldRefreshToken = (status: unknown): boolean => {
+		if (shouldSkipTokenRefresh) return false;
+		if (!isTokenExpiredStatusCode(status, tokenExpiredStatusCode)) return false;
+		if (status === 401 || oAuth2Options?.refreshOnlyIfTokenExpired !== true) return true;
+		return !isStoredTokenUnexpired(credentials);
+	};
+
 	const refreshCtx: RefreshOAuth2TokenContext = {
 		credentials,
 		token,
@@ -510,10 +536,7 @@ export async function requestOAuth2(
 
 	if (isN8nRequest) {
 		return await this.helpers.httpRequest(newRequestOptions).catch(async (error: AxiosError) => {
-			if (
-				!shouldSkipTokenRefresh &&
-				isTokenExpiredStatusCode(error.response?.status, tokenExpiredStatusCode)
-			) {
+			if (shouldRefreshToken(error.response?.status)) {
 				return await retryWithNewToken(
 					async (opts) => await this.helpers.httpRequest(opts),
 					() => {
@@ -530,20 +553,16 @@ export async function requestOAuth2(
 		.then((response) => {
 			const requestOptions = newRequestOptions as any;
 			if (
-				!shouldSkipTokenRefresh &&
 				requestOptions.resolveWithFullResponse === true &&
 				requestOptions.simple === false &&
-				isTokenExpiredStatusCode(response.statusCode, tokenExpiredStatusCode)
+				shouldRefreshToken(response.statusCode)
 			) {
 				throw response;
 			}
 			return response;
 		})
 		.catch(async (error: IResponseError) => {
-			if (
-				!shouldSkipTokenRefresh &&
-				isTokenExpiredStatusCode(error.statusCode, tokenExpiredStatusCode)
-			) {
+			if (shouldRefreshToken(error.statusCode)) {
 				return await retryWithNewToken(
 					async (opts) => await this.helpers.request(opts as IRequestOptions),
 					() => {

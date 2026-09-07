@@ -18,11 +18,16 @@ export const SERVICE_ACCOUNT_CREDENTIAL_NAME = 'atlassianServiceAccountApi';
 
 // The gateway (api.atlassian.com/ex/confluence/{cloudId}) answers 404 on v2 paths and 403
 // on v1 paths for an expired token, instead of the 401 n8n's credential-refresh helpers
-// look for by default (ENT-408). The OAuth2 credential is OAuth2-parented, so it opts in
-// via `tokenExpiredStatusCode`; the Service Account credential goes through the generic
-// preAuthentication path instead, so it opts in via `preAuthenticationRetryStatusCode`.
+// look for by default (ENT-408). 401 stays in the list, since the gateway still answers it
+// for a revoked token. `refreshOnlyIfTokenExpired` keeps a genuinely missing page from
+// costing a refresh: 403 and 404 only force one once the stored token is past its expiry.
+// The OAuth2 credential is OAuth2-parented, so it opts in via `tokenExpiredStatusCode`; the
+// Service Account credential goes through the generic preAuthentication path instead, so it
+// opts in via `preAuthenticationRetryStatusCode`.
 const ADDITIONAL_CREDENTIAL_OPTIONS: Record<string, IAdditionalCredentialOptions> = {
-	[CONFLUENCE_CREDENTIAL_NAME]: { oauth2: { tokenExpiredStatusCode: [403, 404] } },
+	[CONFLUENCE_CREDENTIAL_NAME]: {
+		oauth2: { tokenExpiredStatusCode: [401, 403, 404], refreshOnlyIfTokenExpired: true },
+	},
 	[SERVICE_ACCOUNT_CREDENTIAL_NAME]: { preAuthenticationRetryStatusCode: [401, 403, 404] },
 };
 

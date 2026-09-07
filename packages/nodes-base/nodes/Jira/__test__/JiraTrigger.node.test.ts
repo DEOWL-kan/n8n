@@ -18,6 +18,12 @@ import {
 } from '../GenericFunctions';
 import { JiraTrigger } from '../JiraTrigger.node';
 
+// ENT-408: the gateway answers 403/404 instead of 401 on an expired token, and
+// `refreshOnlyIfTokenExpired` keeps a genuinely missing issue from forcing a refresh.
+const OAUTH2_RETRY_OPTIONS = {
+	oauth2: { tokenExpiredStatusCode: [401, 403, 404], refreshOnlyIfTokenExpired: true },
+};
+
 describe('JiraTrigger', () => {
 	describe('Webhook lifecycle', () => {
 		let staticData: IDataObject;
@@ -242,7 +248,7 @@ describe('JiraTrigger', () => {
 			expect(mockExistsRequest).toHaveBeenCalledWith(
 				'jiraSoftwareCloudOAuth2Api',
 				expect.objectContaining({ uri: baseApiUrl, method: 'GET' }),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 			expect(staticData.endpoint).toBe('/api/3/webhook');
 			expect(exists).toBe(false);
@@ -268,7 +274,7 @@ describe('JiraTrigger', () => {
 						webhooks: [{ events: ['comment_created'], jqlFilter: 'project = TEST' }],
 					},
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 			expect(created).toBe(true);
 			expect(staticData.webhookId).toBe('1000');
@@ -289,7 +295,7 @@ describe('JiraTrigger', () => {
 					uri: baseApiUrl,
 					body: { webhookIds: [1000] },
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 		});
 
@@ -350,7 +356,7 @@ describe('JiraTrigger', () => {
 					uri: `${baseApiUrl}/refresh`,
 					body: { webhookIds: [2000] },
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 		});
 
@@ -439,7 +445,7 @@ describe('JiraTrigger', () => {
 					uri: `${baseApiUrl}/refresh`,
 					body: { webhookIds: [3000] },
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 			expect(staleData.lastRefreshed).toBeGreaterThan(
 				Date.now() - OAUTH2_WEBHOOK_REFRESH_INTERVAL_MS,
@@ -525,7 +531,7 @@ describe('JiraTrigger', () => {
 						webhooks: [{ events: expectedFiltered, jqlFilter: 'project = TEST' }],
 					}),
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 		});
 

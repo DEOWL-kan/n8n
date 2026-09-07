@@ -7,6 +7,12 @@ import {
 	type JiraSoftwareCloudApiRequest,
 } from '../GenericFunctions';
 
+// ENT-408: the gateway answers 403/404 instead of 401 on an expired token, and
+// `refreshOnlyIfTokenExpired` keeps a genuinely missing issue from forcing a refresh.
+const OAUTH2_RETRY_OPTIONS = {
+	oauth2: { tokenExpiredStatusCode: [401, 403, 404], refreshOnlyIfTokenExpired: true },
+};
+
 describe('Jira -> GenericFunctions', () => {
 	describe('jiraSoftwareCloudApiRequestAllItems', () => {
 		let mockExecuteFunctions: DeepMockProxy<IExecuteFunctions>;
@@ -134,7 +140,7 @@ describe('Jira -> GenericFunctions', () => {
 				expect.objectContaining({
 					uri: `https://api.atlassian.com/ex/jira/${cloudId}/rest/api/2/myself`,
 				}),
-				{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+				OAUTH2_RETRY_OPTIONS,
 			);
 		});
 
@@ -243,7 +249,7 @@ describe('Jira -> GenericFunctions', () => {
 			// are mocked in this file, so these tests only pin what jiraSoftwareCloudApiRequest
 			// itself is responsible for: passing the option through, and not retrying locally.
 
-			it('passes tokenExpiredStatusCode: [403, 404] for cloudOAuth2', async () => {
+			it('passes tokenExpiredStatusCode: [401, 403, 404] for cloudOAuth2', async () => {
 				mockExecuteFunctions.getNodeParameter.mockReturnValue('cloudOAuth2');
 				mockExecuteFunctions.getCredentials.mockResolvedValue({
 					domain: 'https://example.atlassian.net',
@@ -257,7 +263,7 @@ describe('Jira -> GenericFunctions', () => {
 				expect(mockExecuteFunctions.helpers.requestWithAuthentication).toHaveBeenCalledWith(
 					'jiraSoftwareCloudOAuth2Api',
 					expect.anything(),
-					{ oauth2: { tokenExpiredStatusCode: [403, 404] } },
+					OAUTH2_RETRY_OPTIONS,
 				);
 			});
 

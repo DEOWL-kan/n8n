@@ -97,12 +97,14 @@ export async function jiraSoftwareCloudApiRequest(
 
 	// The gateway (api.atlassian.com/ex/jira/{cloudId}) answers 404 on v2 paths and 403 on
 	// v1 paths for an expired token, instead of the 401 n8n's OAuth2 refresh looks for by
-	// default (ENT-408). atlassianServiceAccountApi isn't OAuth2-parented, so it doesn't
-	// go through this option — its own credential-refresh retry already covers any
-	// failed request, gateway quirk or not.
+	// default (ENT-408). 401 stays in the list, since the gateway still answers it for a
+	// revoked token. `refreshOnlyIfTokenExpired` keeps a genuinely missing issue from costing
+	// a refresh: 403 and 404 only force one once the stored token is past its expiry.
+	// atlassianServiceAccountApi isn't OAuth2-parented, so it doesn't go through this option.
+	// Its own credential-refresh retry already covers any failed request, gateway quirk or not.
 	const additionalCredentialOptions: IAdditionalCredentialOptions | undefined =
 		credentialType === 'jiraSoftwareCloudOAuth2Api'
-			? { oauth2: { tokenExpiredStatusCode: [403, 404] } }
+			? { oauth2: { tokenExpiredStatusCode: [401, 403, 404], refreshOnlyIfTokenExpired: true } }
 			: undefined;
 
 	try {

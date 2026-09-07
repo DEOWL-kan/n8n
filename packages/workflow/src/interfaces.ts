@@ -93,6 +93,13 @@ export interface IOAuth2Options {
 	tokenType?: string;
 	keepBearer?: boolean;
 	tokenExpiredStatusCode?: number | number[];
+	/**
+	 * Whether a `tokenExpiredStatusCode` other than 401 only forces a refresh when the stored
+	 * token is at or past its expiry. Set this when the status is ambiguous, e.g. a gateway that
+	 * answers 404 both for an expired token and for a resource that does not exist, so a batch of
+	 * missing resources does not cost one refresh each. A 401 and an unknown expiry still refresh.
+	 */
+	refreshOnlyIfTokenExpired?: boolean;
 	keyToIncludeInAccessTokenHeader?: string;
 }
 
