@@ -532,6 +532,7 @@ describe('confluenceApiRequestUpload', () => {
 				body: formData,
 				headers: { 'X-Atlassian-Token': 'nocheck' },
 			}),
+			OAUTH2_TOKEN_EXPIRED_STATUS_CODES,
 		);
 		expect(mockHttpRequestWithAuthentication.mock.calls[1][1]).not.toHaveProperty('json');
 		expect(data).toEqual({ results: [{ id: 'att1' }] });
@@ -551,7 +552,11 @@ describe('confluenceApiRequestUpload', () => {
 		expect(error?.httpCode).toBe('403');
 	});
 
-	it('does not retry a 404/403 (the multipart body is a consumed stream, unsafe to replay)', async () => {
+	// Uploads opt into the retry options like every other request, so an expired token is
+	// refreshed and the next run works. Core will not resend this body: it is a consumed
+	// stream, and `hasSingleUseBody` surfaces the original error instead (see
+	// authentication.test.ts, "refreshes but does NOT resend a drained form-data body").
+	it('passes tokenExpiredStatusCode: [401, 403, 404] so an expired token still refreshes', async () => {
 		mockHttpRequestWithAuthentication
 			.mockResolvedValueOnce(accessibleResources)
 			.mockRejectedValueOnce({ message: 'boom', response: { status: 404 } });
@@ -563,8 +568,12 @@ describe('confluenceApiRequestUpload', () => {
 
 		expect(error).toBeInstanceOf(NodeApiError);
 		expect(error?.httpCode).toBe('404');
-		// cloudId lookup, then the single failed attempt. No forced refresh, no retry.
-		expect(mockHttpRequestWithAuthentication).toHaveBeenCalledTimes(2);
+		expect(mockHttpRequestWithAuthentication).toHaveBeenNthCalledWith(
+			2,
+			'confluenceCloudOAuth2Api',
+			expect.anything(),
+			OAUTH2_TOKEN_EXPIRED_STATUS_CODES,
+		);
 	});
 
 	it('surfaces the v1 scope-trap message instead of the generic status text', async () => {

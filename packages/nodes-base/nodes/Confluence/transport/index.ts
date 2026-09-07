@@ -227,10 +227,10 @@ export async function confluenceApiRequestBinary(
  * call. No `json: true` and no explicit Content-Type: `form-data` sets its own
  * multipart boundary, and an explicit header would clobber it.
  *
- * Deliberately does not pass the expired-token retry options: `formData` is a
- * stream consumed by the first attempt, so replaying it on a retry would send
- * a truncated or empty body instead of the file (the ENT-320 failure class).
- * `hasSingleUseBody` in core already guards against resending it either way.
+ * Passes the same expired-token retry options as the other requests. The upload itself
+ * cannot be retried, since `formData` is a stream the first attempt consumed, and core's
+ * `hasSingleUseBody` refuses to resend it (the ENT-320 failure class). The refresh still
+ * runs though, so the token is valid again for the next run instead of staying stale.
  */
 export async function confluenceApiRequestUpload(
 	this: IExecuteFunctions,
@@ -238,6 +238,7 @@ export async function confluenceApiRequestUpload(
 	formData: FormData,
 ): Promise<IDataObject> {
 	const cloudId = await getConfluenceCloudId.call(this);
+	const credentialType = getConfluenceCredentialName(this);
 
 	const options: IHttpRequestOptions = {
 		method: 'PUT',
@@ -251,8 +252,9 @@ export async function confluenceApiRequestUpload(
 	try {
 		return await this.helpers.httpRequestWithAuthentication.call(
 			this,
-			getConfluenceCredentialName(this),
+			credentialType,
 			options,
+			ADDITIONAL_CREDENTIAL_OPTIONS[credentialType],
 		);
 	} catch (error) {
 		throw toConfluenceApiError.call(this, error);
