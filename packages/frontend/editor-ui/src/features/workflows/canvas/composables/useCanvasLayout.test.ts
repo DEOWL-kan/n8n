@@ -1145,6 +1145,24 @@ describe('useCanvasLayout', () => {
 			expect(result.nodes.map((node) => node.id)).not.toContain('sticky');
 		});
 
+		test('leaves a sticky note out when it also covers a partial group member', () => {
+			const { layout } = createStickyOverParallelGroupsSetup({
+				x: 480,
+				y: -80,
+				width: 900,
+				height: 450,
+			});
+
+			const result = layout('selection', {
+				nodeIdsFilter: ['approval-start', 'approval-done', 'billing-start'],
+			});
+
+			const ids = result.nodes.map((node) => node.id);
+			expect(ids).toContain('billing-start');
+			expect(ids).not.toContain('billing-done');
+			expect(ids).not.toContain('sticky');
+		});
+
 		test.each([
 			['without', false],
 			['with', true],

@@ -138,8 +138,11 @@ export function useCanvasLayout(
 				.filter(isCanvasGroupNode)
 				.flatMap((groupNode) => groupNode.data?.group.nodeIds ?? []),
 		);
-		const externalNodes = allNodes.value.filter(
+		const externalStickyCandidates = allNodes.value.filter(
 			(node) => !isCanvasGroupNode(node) && !node.hidden && !allGroupMemberIds.has(node.id),
+		);
+		const blockingNodes = allNodes.value.filter(
+			(node) => !isCanvasGroupNode(node) && !node.hidden && !groupedMemberIds.has(node.id),
 		);
 		const groupBoxes = allNodes.value.filter(isCanvasGroupNode).map(getCurrentGroupBox);
 
@@ -148,7 +151,12 @@ export function useCanvasLayout(
 			(node) => !isCanvasGroupNode(node) && !node.hidden && !groupedMemberIds.has(node.id),
 		);
 
-		const unitsWithStickies = attachCoveringStickies(groupUnits, externalNodes, groupBoxes);
+		const unitsWithStickies = attachCoveringStickies(
+			groupUnits,
+			externalStickyCandidates,
+			blockingNodes,
+			groupBoxes,
+		);
 		const attachedStickyIds = new Set(unitsWithStickies.flatMap(({ stickyIds }) => stickyIds));
 
 		return {
@@ -176,13 +184,14 @@ export function useCanvasLayout(
 	 */
 	function attachCoveringStickies(
 		groupUnits: CanvasLayoutGroupUnit[],
-		externalNodes: CanvasLayoutNode[],
+		externalStickyCandidates: CanvasLayoutNode[],
+		blockingNodes: CanvasLayoutNode[],
 		groupBoxes: GroupBox[],
 	): CanvasLayoutGroupUnit[] {
-		const stickies = externalNodes.filter(isStickyCanvasNode);
+		const stickies = externalStickyCandidates.filter(isStickyCanvasNode);
 		if (stickies.length === 0 || groupUnits.length === 0) return groupUnits;
 
-		const plainNodeBoxes = externalNodes
+		const plainNodeBoxes = blockingNodes
 			.filter((node) => !isStickyCanvasNode(node))
 			.map((node) => boundingBoxFromCanvasNode(node));
 		const groupUnitIds = new Set(groupUnits.map(({ node }) => node.id));
