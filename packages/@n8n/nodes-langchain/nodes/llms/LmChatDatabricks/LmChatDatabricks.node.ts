@@ -32,17 +32,13 @@ function assertHttpsHost(ctx: ILoadOptionsFunctions | ISupplyDataFunctions, host
 	}
 }
 
-interface ServingEndpointsResponse {
-	endpoints?: Array<{
+interface ModelServicesResponse {
+	model_services?: Array<{
 		name: string;
-		task?: string;
-		config?: {
-			served_entities?: Array<{
-				external_model?: { name: string };
-				foundation_model?: { name: string };
-			}>;
-		};
+		comment?: string;
+		supported_api_types?: string[];
 	}>;
+	next_page_token?: string;
 }
 
 async function searchModels(
@@ -53,36 +49,53 @@ async function searchModels(
 	assertHttpsHost(this, credentials.host);
 	const host = credentials.host.replace(/\/$/, '');
 
-	const response: ServingEndpointsResponse = await this.helpers.httpRequestWithAuthentication.call(
-		this,
-		'databricksOAuth2Api',
-		{
-			method: 'GET',
-			url: `${host}/api/2.0/serving-endpoints`,
-			headers: { Accept: 'application/json', 'User-Agent': CHAT_MODEL_USER_AGENT },
-			json: true,
-		},
+	let services: NonNullable<ModelServicesResponse['model_services']> = [];
+	let pageToken: string | undefined;
+	let pages = 0;
+	do {
+		// Guard against a host or proxy that echoes the same next_page_token back
+		if (++pages > 50) {
+			throw new NodeOperationError(this.getNode(), 'Model service list exceeded 50 pages');
+		}
+		const page: ModelServicesResponse = await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			'databricksOAuth2Api',
+			{
+				method: 'GET',
+				url: `${host}/api/2.1/unity-catalog/model-services`,
+				qs: { view: 'FULL', page_token: pageToken },
+				headers: { Accept: 'application/json', 'User-Agent': CHAT_MODEL_USER_AGENT },
+				json: true,
+			},
+		);
+		services = services.concat(page.model_services ?? []);
+		pageToken = page.next_page_token;
+	} while (pageToken);
+
+	if (services.length === 0) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'No model services found - check that Unity AI Gateway is enabled on this workspace and that this credential has access to at least one model service',
+		);
+	}
+
+	// supplyData calls the openai/v1 chat route, so list only services that
+	// advertise it; mlflow-only or untyped services stay reachable via ID mode
+	const chatServices = services.filter((service) =>
+		service.supported_api_types?.includes('openai/v1/chat/completions'),
 	);
 
-	const endpoints = response.endpoints ?? [];
+	if (chatServices.length === 0) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'No chat-capable model services found - none of the visible model services supports openai/v1/chat/completions. Use ID mode to enter a service name directly.',
+		);
+	}
 
-	const allResults = endpoints
-		// Covers llm/v1/chat (foundation/external models) and agent/*/chat; custom
-		// endpoints without a task are reachable via the resourceLocator's ID mode
-		.filter((endpoint) => endpoint.task?.includes('chat'))
-		.map((endpoint) => {
-			const modelNames = (endpoint.config?.served_entities ?? [])
-				.map((entity) => entity.external_model?.name ?? entity.foundation_model?.name)
-				.filter(Boolean)
-				.join(', ');
-
-			return {
-				name: endpoint.name,
-				value: endpoint.name,
-				url: `${host}/ml/endpoints/${endpoint.name}`,
-				description: modelNames || 'Model serving endpoint',
-			};
-		});
+	const allResults = chatServices.map((service) => {
+		const name = service.name.replace(/^model-services\//, '');
+		return { name, value: name, description: service.comment };
+	});
 
 	if (filter) {
 		const filterLower = filter.toLowerCase();
@@ -90,7 +103,7 @@ async function searchModels(
 			results: allResults.filter(
 				(r) =>
 					r.name.toLowerCase().includes(filterLower) ||
-					r.description.toLowerCase().includes(filterLower),
+					(r.description ?? '').toLowerCase().includes(filterLower),
 			),
 		};
 	}
@@ -176,10 +189,11 @@ export class LmChatDatabricks implements INodeType {
 						displayName: 'ID',
 						name: 'id',
 						type: 'string',
-						placeholder: 'my-serving-endpoint',
+						placeholder: 'system.ai.gpt-oss-120b',
 					},
 				],
-				description: 'The serving endpoint. Choose from the list, or specify an ID.',
+				description:
+					'The Unity AI Gateway model service. Choose from the list, or enter its full name (catalog.schema.service).',
 			},
 			{
 				displayName: 'Options',
@@ -287,7 +301,7 @@ export class LmChatDatabricks implements INodeType {
 		}
 		assertHttpsHost(this, credential.host);
 
-		const baseURL = `${credential.host.replace(/\/$/, '')}/serving-endpoints`;
+		const baseURL = `${credential.host.replace(/\/$/, '')}/ai-gateway/openai/v1`;
 
 		const modelName = this.getNodeParameter('model', itemIndex, '', {
 			extractValue: true,
