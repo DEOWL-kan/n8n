@@ -156,8 +156,12 @@ export class AgentBackgroundJobRepository extends Repository<AgentBackgroundJob>
 		return result.affected === 1;
 	}
 
-	/** Retention: drop settled rows past the cutoff. */
+	/** Retention: drop settled rows past the cutoff. Undelivered mail stays until a parent consumes it. */
 	async deleteSettledBefore(cutoff: Date): Promise<void> {
-		await this.delete({ status: Not('running'), settledAt: LessThan(cutoff) });
+		await this.delete({
+			status: Not('running'),
+			settledAt: LessThan(cutoff),
+			notifiedAt: Not(IsNull()),
+		});
 	}
 }
