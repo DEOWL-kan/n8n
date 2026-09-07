@@ -1,9 +1,9 @@
 import '../../openapi-extend';
 
-import type { ZodOpenAPIMetadata } from '@asteasolutions/zod-to-openapi';
 import type { IConnections } from 'n8n-workflow';
 import { z } from 'zod';
 
+import { readOnlyPublicSchema } from '../read-only-public-schema';
 import {
 	connectionsOpenApi,
 	readOnlyTimestampOpenApi,
@@ -13,9 +13,6 @@ import {
 	workflowNodeGroupFieldDocs,
 	workflowSettingsFieldDocs,
 } from './workflow-public.openapi';
-
-const readOnlyPublicSchema = (descriptor: ZodOpenAPIMetadata) =>
-	z.undefined({ invalid_type_error: 'is read-only' }).openapi(descriptor);
 
 const customTelemetryTagPublicSchema = z
 	.object({
