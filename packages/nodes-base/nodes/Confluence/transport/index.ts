@@ -1,5 +1,6 @@
 import type FormData from 'form-data';
 import type {
+	IAdditionalCredentialOptions,
 	IDataObject,
 	IExecuteFunctions,
 	IHttpRequestMethods,
@@ -10,14 +11,20 @@ import type {
 } from 'n8n-workflow';
 import { NodeApiError, NodeOperationError } from 'n8n-workflow';
 
-import {
-	getAtlassianApiBaseUrl,
-	resolveAtlassianCloudId,
-	retryOnceIfTokenExpired,
-} from '@utils/atlassian';
+import { getAtlassianApiBaseUrl, resolveAtlassianCloudId } from '@utils/atlassian';
 
 export const CONFLUENCE_CREDENTIAL_NAME = 'confluenceCloudOAuth2Api';
 export const SERVICE_ACCOUNT_CREDENTIAL_NAME = 'atlassianServiceAccountApi';
+
+// The gateway (api.atlassian.com/ex/confluence/{cloudId}) answers 404 on v2 paths and 403
+// on v1 paths for an expired token, instead of the 401 n8n's credential-refresh helpers
+// look for by default (ENT-408). The OAuth2 credential is OAuth2-parented, so it opts in
+// via `tokenExpiredStatusCode`; the Service Account credential goes through the generic
+// preAuthentication path instead, so it opts in via `preAuthenticationRetryStatusCode`.
+const ADDITIONAL_CREDENTIAL_OPTIONS: Record<string, IAdditionalCredentialOptions> = {
+	[CONFLUENCE_CREDENTIAL_NAME]: { oauth2: { tokenExpiredStatusCode: [403, 404] } },
+	[SERVICE_ACCOUNT_CREDENTIAL_NAME]: { preAuthenticationRetryStatusCode: [401, 403, 404] },
+};
 
 /**
  * Resolves which credential the node is configured with. Dual-context like
@@ -156,11 +163,13 @@ export async function confluenceApiRequest(
 		json: true,
 	};
 
-	const makeRequest = async () =>
-		await this.helpers.httpRequestWithAuthentication.call(this, credentialType, options);
-
 	try {
-		return await retryOnceIfTokenExpired(this, credentialType, makeRequest);
+		return await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			credentialType,
+			options,
+			ADDITIONAL_CREDENTIAL_OPTIONS[credentialType],
+		);
 	} catch (error) {
 		throw toConfluenceApiError.call(this, error);
 	}
@@ -187,12 +196,14 @@ export async function confluenceApiRequestBinary(
 		sendCredentialsOnCrossOriginRedirect: false,
 	};
 
-	const makeRequest = async () =>
-		await this.helpers.httpRequestWithAuthentication.call(this, credentialType, options);
-
 	let data: unknown;
 	try {
-		data = await retryOnceIfTokenExpired(this, credentialType, makeRequest);
+		data = await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			credentialType,
+			options,
+			ADDITIONAL_CREDENTIAL_OPTIONS[credentialType],
+		);
 	} catch (error) {
 		throw toConfluenceApiError.call(this, error);
 	}
@@ -211,9 +222,10 @@ export async function confluenceApiRequestBinary(
  * call. No `json: true` and no explicit Content-Type: `form-data` sets its own
  * multipart boundary, and an explicit header would clobber it.
  *
- * Deliberately not wrapped in `retryOnceIfTokenExpired`: `formData` is a
+ * Deliberately does not pass the expired-token retry options: `formData` is a
  * stream consumed by the first attempt, so replaying it on a retry would send
  * a truncated or empty body instead of the file (the ENT-320 failure class).
+ * `hasSingleUseBody` in core already guards against resending it either way.
  */
 export async function confluenceApiRequestUpload(
 	this: IExecuteFunctions,

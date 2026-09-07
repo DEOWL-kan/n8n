@@ -1,4 +1,5 @@
 import type {
+	IAdditionalCredentialOptions,
 	IDataObject,
 	IExecuteFunctions,
 	IHookFunctions,
@@ -17,17 +18,9 @@ import {
 	getAtlassianCloudId,
 	getAtlassianSiteParameter,
 	resolveAtlassianCloudId,
-	retryOnceIfTokenExpired,
 } from '@utils/atlassian';
 
 import type { JiraServerInfo, JiraWebhook } from './types';
-
-// The gateway-routed OAuth2 credentials: both go through api.atlassian.com/ex/jira/{cloudId},
-// the same gateway that answers 404/403 instead of 401 on an expired token (ENT-408).
-const GATEWAY_OAUTH2_CREDENTIAL_TYPES = [
-	'jiraSoftwareCloudOAuth2Api',
-	'atlassianServiceAccountApi',
-];
 
 export async function jiraSoftwareCloudApiRequest(
 	this: IHookFunctions | IExecuteFunctions | ILoadOptionsFunctions | IWebhookFunctions,
@@ -102,17 +95,25 @@ export async function jiraSoftwareCloudApiRequest(
 		delete options.qs;
 	}
 
-	// A formData body (e.g. issue attachment upload) can carry a stream. The first
-	// attempt consumes it, so it's never safe to replay. Skip the forced-refresh retry then.
-	const canRetryOnExpiry =
-		GATEWAY_OAUTH2_CREDENTIAL_TYPES.includes(credentialType) && options.formData === undefined;
-	const makeRequest = async () =>
-		await this.helpers.requestWithAuthentication.call(this, credentialType, options);
+	// The gateway (api.atlassian.com/ex/jira/{cloudId}) answers 404 on v2 paths and 403 on
+	// v1 paths for an expired token, instead of the 401 n8n's OAuth2 refresh looks for by
+	// default (ENT-408). atlassianServiceAccountApi isn't OAuth2-parented, so it doesn't
+	// go through this option — its own credential-refresh retry already covers any
+	// failed request, gateway quirk or not.
+	const additionalCredentialOptions: IAdditionalCredentialOptions | undefined =
+		credentialType === 'jiraSoftwareCloudOAuth2Api'
+			? { oauth2: { tokenExpiredStatusCode: [403, 404] } }
+			: undefined;
 
 	try {
-		return canRetryOnExpiry
-			? await retryOnceIfTokenExpired(this, credentialType, makeRequest)
-			: await makeRequest();
+		return await (additionalCredentialOptions
+			? this.helpers.requestWithAuthentication.call(
+					this,
+					credentialType,
+					options,
+					additionalCredentialOptions,
+				)
+			: this.helpers.requestWithAuthentication.call(this, credentialType, options));
 	} catch (error) {
 		if (error.description?.includes?.("Field 'priority' cannot be set")) {
 			throw new NodeApiError(this.getNode(), error as JsonObject, {

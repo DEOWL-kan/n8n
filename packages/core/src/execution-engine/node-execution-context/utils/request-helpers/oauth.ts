@@ -310,8 +310,20 @@ async function refreshOrFetchToken(ctx: RefreshOAuth2TokenContext): Promise<Clie
 function resolveTokenExpiredStatusCode(
 	oAuth2Options?: IOAuth2Options,
 	credentials?: OAuth2CredentialData,
-): number {
+): number | number[] {
 	return credentials?.tokenExpiredStatusCode ?? oAuth2Options?.tokenExpiredStatusCode ?? 401;
+}
+
+// Some gateways signal an expired token with different codes on different endpoints
+// (e.g. 403 on legacy paths, 404 on newer ones), so a single caller may need to match more
+// than one status.
+export function isTokenExpiredStatusCode(
+	status: unknown,
+	tokenExpiredStatusCode: number | number[],
+) {
+	return Array.isArray(tokenExpiredStatusCode)
+		? tokenExpiredStatusCode.includes(status as number)
+		: status === tokenExpiredStatusCode;
 }
 
 function isSingleUseValue(value: unknown): boolean {
@@ -498,7 +510,10 @@ export async function requestOAuth2(
 
 	if (isN8nRequest) {
 		return await this.helpers.httpRequest(newRequestOptions).catch(async (error: AxiosError) => {
-			if (!shouldSkipTokenRefresh && error.response?.status === tokenExpiredStatusCode) {
+			if (
+				!shouldSkipTokenRefresh &&
+				isTokenExpiredStatusCode(error.response?.status, tokenExpiredStatusCode)
+			) {
 				return await retryWithNewToken(
 					async (opts) => await this.helpers.httpRequest(opts),
 					() => {
@@ -518,14 +533,17 @@ export async function requestOAuth2(
 				!shouldSkipTokenRefresh &&
 				requestOptions.resolveWithFullResponse === true &&
 				requestOptions.simple === false &&
-				response.statusCode === tokenExpiredStatusCode
+				isTokenExpiredStatusCode(response.statusCode, tokenExpiredStatusCode)
 			) {
 				throw response;
 			}
 			return response;
 		})
 		.catch(async (error: IResponseError) => {
-			if (!shouldSkipTokenRefresh && error.statusCode === tokenExpiredStatusCode) {
+			if (
+				!shouldSkipTokenRefresh &&
+				isTokenExpiredStatusCode(error.statusCode, tokenExpiredStatusCode)
+			) {
 				return await retryWithNewToken(
 					async (opts) => await this.helpers.request(opts as IRequestOptions),
 					() => {

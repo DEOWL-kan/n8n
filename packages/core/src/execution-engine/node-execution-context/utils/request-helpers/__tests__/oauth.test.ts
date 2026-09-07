@@ -708,6 +708,60 @@ describe('requestOAuth2 - tokenExpiredStatusCode', () => {
 		expect(mockThis.helpers.httpRequest).toHaveBeenCalledTimes(2);
 	});
 
+	test.each([403, 404])(
+		'should retry on %i when tokenExpiredStatusCode is the array [403, 404] (isN8nRequest path)',
+		async (status) => {
+			mockThis.getCredentials.mockResolvedValue(
+				makeCredentialData({ tokenExpiredStatusCode: [403, 404] }),
+			);
+
+			nock(tokenUrl).post('/token').reply(200, {
+				access_token: 'new-token',
+				token_type: 'bearer',
+			});
+
+			mockThis.helpers.httpRequest.mockRejectedValueOnce(
+				Object.assign(new Error(String(status)), { response: { status } }),
+			);
+			mockThis.helpers.httpRequest.mockResolvedValueOnce({ success: true });
+
+			const result = await requestOAuth2.call(
+				mockThis,
+				'testOAuth2',
+				{ method: 'GET', url: `${baseUrl}/data` },
+				mockNode,
+				mockAdditionalData,
+				undefined,
+				true,
+			);
+
+			expect(result).toEqual({ success: true });
+			expect(mockThis.helpers.httpRequest).toHaveBeenCalledTimes(2);
+		},
+	);
+
+	test('should NOT retry on a status outside the [403, 404] array (isN8nRequest path)', async () => {
+		mockThis.getCredentials.mockResolvedValue(
+			makeCredentialData({ tokenExpiredStatusCode: [403, 404] }),
+		);
+		const error401 = Object.assign(new Error('401'), { response: { status: 401 } });
+		mockThis.helpers.httpRequest.mockRejectedValueOnce(error401);
+
+		await expect(
+			requestOAuth2.call(
+				mockThis,
+				'testOAuth2',
+				{ method: 'GET', url: `${baseUrl}/data` },
+				mockNode,
+				mockAdditionalData,
+				undefined,
+				true,
+			),
+		).rejects.toThrow('401');
+
+		expect(mockThis.helpers.httpRequest).toHaveBeenCalledTimes(1);
+	});
+
 	test('should NOT retry on token-expired status when oAuth2Options.skipTokenRefresh is true (isN8nRequest path)', async () => {
 		mockThis.getCredentials.mockResolvedValue(makeCredentialData());
 		const error401 = Object.assign(new Error('401'), { response: { status: 401 } });

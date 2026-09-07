@@ -213,55 +213,6 @@ export async function getAtlassianCloudId(
 	return site.id;
 }
 
-/** Same dual-shape status extraction across Atlassian gateway transports: the
- * request helper can throw either a pre-wrapped NodeApiError or a raw error
- * with `response.status`. */
-function extractHttpStatus(error: unknown): string | undefined {
-	if (error instanceof NodeApiError) return error.httpCode ?? undefined;
-	const status = (error as { response?: { status?: unknown } })?.response?.status;
-	return typeof status === 'number' || typeof status === 'string' ? String(status) : undefined;
-}
-
-/**
- * The gateway (api.atlassian.com/ex/{product}/{cloudId}) answers 404 on v2
- * paths and 403 on v1 paths for an expired token. It never answers 401, the
- * status n8n's OAuth2 helper waits for before refreshing. `accessible-resources`
- * does return 401 on real expiry, so forcing that call first refreshes the
- * token, then the request is retried once. A page or issue that's genuinely
- * gone still 404s on the retry, so this can't loop. Only wrap a request whose
- * body is safe to send twice. Never wrap a multipart upload: its stream is
- * already consumed.
- */
-
-// credentialId → epoch ms of the last forced accessible-resources refresh. A real token
-// refresh completes well under this window, so a 404/403 this soon after one means the
-// token is already current and the failure is a genuine missing resource, not expiry.
-// Without this, a batch of many missing resources in one execution forces a refresh per
-// item instead of once, multiplying calls to Atlassian's accessible-resources endpoint.
-const lastForcedRefreshAt = new Map<string, number>();
-const FORCED_REFRESH_DEBOUNCE_MS = 5_000;
-
-export async function retryOnceIfTokenExpired<T>(
-	ctx: AtlassianContext,
-	credentialType: string,
-	request: () => Promise<T>,
-): Promise<T> {
-	try {
-		return await request();
-	} catch (error) {
-		const httpCode = extractHttpStatus(error);
-		if (httpCode !== '404' && httpCode !== '403') throw error;
-
-		const credentialId = ctx.getNode().credentials?.[credentialType]?.id;
-		const lastForced = credentialId ? lastForcedRefreshAt.get(credentialId) : undefined;
-		if (lastForced === undefined || Date.now() - lastForced >= FORCED_REFRESH_DEBOUNCE_MS) {
-			if (credentialId) lastForcedRefreshAt.set(credentialId, Date.now());
-			await fetchAtlassianAccessibleResources.call(ctx, credentialType, { bypassCache: true });
-		}
-		return await request();
-	}
-}
-
 /**
  * Resolves a node's top-level Site parameter to a cloudId. From List stores the
  * cloudId directly (accessible-resources returns it); By URL is hostname-matched

@@ -49,6 +49,12 @@ export type { WorkflowExecuteModeValues as WorkflowExecuteMode } from './executi
 export interface IAdditionalCredentialOptions {
 	oauth2?: IOAuth2Options;
 	credentialsDecrypted?: ICredentialsDecrypted;
+	/**
+	 * Status code(s) that trigger the generic preAuthentication refresh-and-resend in
+	 * `httpRequestWithAuthentication` (non-OAuth1/OAuth2 credentials only). Defaults to 401;
+	 * override when a gateway signals an expired token with a different status.
+	 */
+	preAuthenticationRetryStatusCode?: number | number[];
 }
 
 export type IAllExecuteFunctions =
@@ -86,7 +92,7 @@ export interface IOAuth2Options {
 	property?: string;
 	tokenType?: string;
 	keepBearer?: boolean;
-	tokenExpiredStatusCode?: number;
+	tokenExpiredStatusCode?: number | number[];
 	keyToIncludeInAccessTokenHeader?: string;
 }
 

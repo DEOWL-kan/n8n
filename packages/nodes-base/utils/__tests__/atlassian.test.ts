@@ -11,7 +11,6 @@ import {
 	getAtlassianApiBaseUrl,
 	getAtlassianCloudId,
 	resolveAtlassianCloudId,
-	retryOnceIfTokenExpired,
 } from '../atlassian';
 
 describe('extractAtlassianSiteHostname', () => {
@@ -571,67 +570,5 @@ describe('resolveAtlassianCloudId', () => {
 		);
 
 		expect(result).toBe('cloud-2');
-	});
-});
-
-describe('retryOnceIfTokenExpired', () => {
-	const credentialType = 'confluenceCloudOAuth2Api';
-	let ctx: Mocked<IExecuteFunctions>;
-	let mockHttpRequestWithAuthentication: Mock;
-	let credentialCounter = 0;
-
-	const gatewayError = (status: number) =>
-		Object.assign(new Error('gateway error'), {
-			response: { status },
-		});
-
-	beforeEach(() => {
-		vi.clearAllMocks();
-		clearAtlassianAccessibleResourcesCache();
-		// A fresh credential id per test avoids the module-level debounce timer leaking
-		// state across tests within the debounce window.
-		credentialCounter += 1;
-		ctx = mockDeep<IExecuteFunctions>();
-		mockHttpRequestWithAuthentication = vi.fn().mockResolvedValue([]);
-		ctx.helpers.httpRequestWithAuthentication = mockHttpRequestWithAuthentication;
-		ctx.getNode.mockReturnValue({
-			id: 'test-node',
-			name: 'Test Node',
-			type: 'n8n-nodes-base.confluence',
-			typeVersion: 1,
-			position: [0, 0],
-			parameters: {},
-			credentials: { [credentialType]: { id: `cred-${credentialCounter}`, name: 'account' } },
-		});
-	});
-
-	it('forces one accessible-resources refresh and retries once on a gateway 404', async () => {
-		const request = vi.fn().mockRejectedValueOnce(gatewayError(404)).mockResolvedValueOnce('ok');
-
-		const result = await retryOnceIfTokenExpired(ctx, credentialType, request);
-
-		expect(result).toBe('ok');
-		expect(request).toHaveBeenCalledTimes(2);
-		expect(mockHttpRequestWithAuthentication).toHaveBeenCalledTimes(1);
-	});
-
-	it('does not force a second refresh for another item failing right after', async () => {
-		const firstItem = vi.fn().mockRejectedValueOnce(gatewayError(404)).mockResolvedValueOnce('ok');
-		await retryOnceIfTokenExpired(ctx, credentialType, firstItem);
-
-		const secondItem = vi.fn().mockRejectedValueOnce(gatewayError(404)).mockResolvedValueOnce('ok');
-		await retryOnceIfTokenExpired(ctx, credentialType, secondItem);
-
-		expect(mockHttpRequestWithAuthentication).toHaveBeenCalledTimes(1);
-	});
-
-	it('rethrows without retrying for a non-401-proxy status', async () => {
-		const request = vi.fn().mockRejectedValueOnce(gatewayError(500));
-
-		await expect(retryOnceIfTokenExpired(ctx, credentialType, request)).rejects.toThrow(
-			'gateway error',
-		);
-		expect(request).toHaveBeenCalledTimes(1);
-		expect(mockHttpRequestWithAuthentication).not.toHaveBeenCalled();
 	});
 });
